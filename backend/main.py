@@ -1,19 +1,21 @@
 """
 FixIt AI Backend - Main API
-Implements gate-based routing for robust device troubleshooting.
+Implements enhanced gate-based routing with answer_type enforcement.
 
 Pipeline:
-GATE 1: Image Type Validation
-GATE 2: Device Detection (with confidence routing)
-GATE 3: Query Understanding
-GATE 4: Component Localization (conditional)
-GATE 5: Response Generation (confidence-matched)
+GATE 0: Image Processing
+GATE 1-3: Combined Analysis (validation + detection + query parsing + safety + intent)
+GATE 4: Component Localization (conditional, multi-target)
+GATE 5: Web Grounding with Gemini Native Google Search (conditional)
+GATE 6: Response Generation (answer_type-aware, enriched with web results)
+GATE 7: Response Assembly + Audio Generation + Schema Validation
+
+Note: RAG engine removed - using Gemini native grounding exclusively for knowledge retrieval.
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional, Tuple, Dict, Any, Union
+from typing import List, Optional
 import logging
 import time
 import os
@@ -22,19 +24,20 @@ import os
 from backend.utils.image_processor import process_image_for_gemini
 from backend.utils.gemini_client import gemini_client, get_quota_status, reset_circuit_breaker
 from backend.utils.response_builder import (
-    build_troubleshoot_response, 
+    build_enhanced_response,
     build_rejection_response,
     build_low_confidence_response,
     build_component_not_found_response,
-    ResponseStatus
+    ResponseStatus,
 )
+from backend.utils.schema_validator import validate_response
+from backend.utils.audio_generator import generate_audio_script
 
 # Agents
 from backend.agents.image_validator import image_validator
 from backend.agents.device_detector import device_detector
-from backend.agents.query_parser import query_parser
 from backend.agents.spatial_mapper import spatial_mapper
-from backend.agents.rag_engine import rag_engine
+# RAG engine removed - using Gemini native grounding instead
 from backend.agents.step_generator import step_generator
 
 # Configure Logging
@@ -44,7 +47,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="FixIt AI Backend",
     description="AI-powered device troubleshooting with visual understanding",
-    version="0.2.0"
+    version="0.3.0",
 )
 
 # CORS Middleware
@@ -56,58 +59,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Response Models ---
-
-class BoundingBox(BaseModel):
-    x_min: int
-    y_min: int
-    x_max: int
-    y_max: int
-
-class TroubleshootingStep(BaseModel):
-    step_number: int
-    instruction: str
-    visual_cue: Optional[str] = None
-    estimated_time: Optional[str] = None
-    safety_note: Optional[str] = None
-    caveat: Optional[str] = None
-
-class TroubleshootResponse(BaseModel):
-    """Extended response model with status and scenario-specific fields."""
-    status: str = "success"
-    device_identified: Optional[str] = None
-    device_confidence: float = 0.0
-    confidence_level: Optional[str] = None
-    component: Optional[str] = None
-    spatial_description: Optional[str] = None
-    bounding_box: Optional[BoundingBox] = None
-    issue_diagnosis: str
-    troubleshooting_steps: List[TroubleshootingStep]
-    audio_instructions: str
-    
-    # Scenario-specific fields
-    message: Optional[str] = None
-    clarifying_questions: Optional[List[str]] = None
-    suggestions: Optional[List[str]] = None
-    supported_devices: Optional[List[str]] = None
-    visible_alternatives: Optional[List[str]] = None
-    typical_location: Optional[str] = None
-    detected_components: Optional[List[str]] = None
-    reasoning: Optional[str] = None
-    warnings: Optional[List[str]] = None
-    when_to_seek_help: Optional[str] = None
-    general_safety_tip: Optional[str] = None
-    what_i_see: Optional[str] = None
-
 # Confidence thresholds
 HIGH_CONFIDENCE_THRESHOLD = 0.6
 MEDIUM_CONFIDENCE_THRESHOLD = 0.3
+
+# Safety keywords that force safety_warning_only
+SAFETY_KEYWORDS = [
+    "burning", "smoke", "melting", "swelling battery", "swollen battery",
+    "electric shock", "exposed mains", "sparking", "fire", "disconnect power",
+    "electrocution", "short circuit", "overheating", "burning smell",
+]
 
 # --- Endpoints ---
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "version": "0.2.0", "pipeline": "gate-based"}
+    return {"status": "healthy", "version": "0.3.0", "pipeline": "enhanced-gate-based"}
+
 
 @app.post("/api/troubleshoot")
 async def troubleshoot(
@@ -119,61 +87,107 @@ async def troubleshoot(
 ):
     """
     Main endpoint for visual troubleshooting.
-    Implements gate-based routing for robust handling of all scenarios.
-    
+    Implements enhanced gate-based routing with answer_type enforcement.
+
     Gates:
-    1. Image Type Validation - Reject non-device images
-    2. Device Detection - Confidence-based routing
-    3. Query Understanding - Parse user intent
-    4. Component Localization - Only when needed
-    5. Response Generation - Match quality to confidence
+    0. Image Processing
+    1-3. Combined Analysis (validation + detection + intent + safety)
+    4. Component Localization (conditional, multi-target)
+    5. Response Generation (answer_type-aware)
+    6. Web Grounding (conditional)
+    7. Response Assembly + Audio + Schema Validation
     """
     start_time = time.time()
     logger.info(f"Received troubleshoot request: '{query}'")
-    
+
     try:
         # ===========================================
-        # STEP 0: Image Processing
+        # GATE 0: Image Processing
         # ===========================================
-        logger.info("Step 0: Processing Image...")
+        logger.info("GATE 0: Processing Image...")
         try:
             image = process_image_for_gemini(image_base64)
             current_width, current_height = image.size
             if not image_width or not image_height:
                 image_width, image_height = current_width, current_height
         except Exception as e:
+            logger.error(f"Image processing failed: {e}")
             raise HTTPException(status_code=400, detail=f"Invalid image: {str(e)}")
 
         # ===========================================
-        # GATES 1-3: Combined Analysis (1 call)
+        # GATES 1-3: Combined Analysis (1 API call)
+        # Intent + Validation + Detection + Safety
         # ===========================================
-        logger.info("GATES 1-3: Combined validation + detection + query parsing...")
-        combined_result = gemini_client.generate_combined_analysis(
-            image=image,
-            query=query,
-            device_hint=device_hint
-        )
+        logger.info("GATES 1-3: Combined analysis...")
+        try:
+            combined_result = gemini_client.generate_combined_analysis(
+                image=image,
+                query=query,
+                device_hint=device_hint,
+            )
+        except Exception as e:
+            logger.error(f"Combined analysis failed: {e}")
+            combined_result = {"error": str(e)}
 
         if combined_result.get("error"):
-            logger.error("Combined analysis failed (quota or provider error).")
-            return {
-                "status": ResponseStatus.ERROR,
-                "message": combined_result.get("error"),
-                "retry_after": combined_result.get("retry_after", "tomorrow")
-            }
+            logger.error(f"Combined analysis error: {combined_result.get('error')}")
+            return _build_error_response(combined_result)
 
+        # Extract sub-results
         validation_info = combined_result.get("validation", {})
         device_info = combined_result.get("device", {})
         query_info = combined_result.get("query", {})
+        safety_info = combined_result.get("safety", {})
 
+        # ===========================================
+        # DECISION GATE: Image Validity
+        # ===========================================
         if not validation_info.get("is_valid", False):
-            logger.info(f"GATE 1 REJECTED: {validation_info.get('image_category')} - {validation_info.get('rejection_reason')}")
+            logger.info(f"GATE 1 REJECTED: {validation_info.get('image_category')}")
             response = build_rejection_response(validation_info, query)
-            logger.info(f"Request completed in {time.time() - start_time:.2f}s (rejected at Gate 1)")
+            response["audio_instructions"] = generate_audio_script(response)
+            response = validate_response(response)
+            logger.info(f"Completed in {time.time() - start_time:.2f}s (rejected)")
             return response
 
+        # ===========================================
+        # DECISION GATE: Image Quality
+        # ===========================================
+        image_quality = validation_info.get("image_quality", "good")
+        if image_quality in ("blurry", "dark", "too_far"):
+            logger.info(f"GATE 1b: Image quality issue: {image_quality}")
+            query_info["answer_type"] = "ask_for_better_input"
+
+        # ===========================================
+        # DECISION GATE: Safety Override
+        # ===========================================
+        safety_detected = safety_info.get("safety_detected", False)
+        if not safety_detected:
+            # Also check query text for safety keywords
+            query_lower = query.lower()
+            for keyword in SAFETY_KEYWORDS:
+                if keyword in query_lower:
+                    safety_detected = True
+                    safety_info["safety_detected"] = True
+                    safety_info["safety_keywords_found"] = [keyword]
+                    safety_info["safety_message"] = (
+                        "STOP. This situation may require professional help. "
+                        "Do NOT attempt DIY repair. Contact a qualified professional."
+                    )
+                    safety_info["override_answer_type"] = True
+                    break
+
+        if safety_detected and safety_info.get("override_answer_type", False):
+            logger.info("SAFETY OVERRIDE: Forcing safety_warning_only")
+            query_info["answer_type"] = "safety_warning_only"
+
+        # ===========================================
+        # DECISION GATE: Device Detection Confidence
+        # ===========================================
         device_type = device_info.get("device_type", "Unknown")
         device_confidence = device_info.get("device_confidence", 0.0)
+
+        # Compute confidence_level if not provided
         confidence_level = device_info.get("confidence_level")
         if not confidence_level:
             if device_confidence >= HIGH_CONFIDENCE_THRESHOLD:
@@ -184,170 +198,404 @@ async def troubleshoot(
                 confidence_level = "low"
             device_info["confidence_level"] = confidence_level
 
-        logger.info(f"Detected: {device_type} (Confidence: {device_confidence:.2f}, Level: {confidence_level})")
+        logger.info(f"Device: {device_type} ({device_confidence:.2f}, {confidence_level})")
 
         if device_type == "not_a_device":
             logger.info("GATE 2 REJECTED: Not a device")
-            response = build_rejection_response({
-                "rejection_reason": device_info.get("reasoning", "This does not appear to be an electronic device."),
-                "what_i_see": validation_info.get("what_i_see", ""),
-                "suggestion": validation_info.get("suggestion", "Please upload a photo of an electronic device you need help with."),
-                "image_category": "not_a_device"
-            }, query)
-            logger.info(f"Request completed in {time.time() - start_time:.2f}s (rejected at Gate 2)")
+            response = build_rejection_response(
+                {
+                    "rejection_reason": device_info.get("reasoning", "Not an electronic device."),
+                    "what_i_see": validation_info.get("what_i_see", ""),
+                    "suggestion": "Please upload a photo of an electronic device.",
+                    "image_category": "not_a_device",
+                },
+                query,
+            )
+            response["audio_instructions"] = generate_audio_script(response)
+            response = validate_response(response)
+            logger.info(f"Completed in {time.time() - start_time:.2f}s (not a device)")
             return response
 
-        if confidence_level == "low" or device_confidence < MEDIUM_CONFIDENCE_THRESHOLD:
-            logger.info("GATE 2 LOW CONFIDENCE: Generating clarification response")
-            response = build_low_confidence_response(device_info, query)
-            logger.info(f"Request completed in {time.time() - start_time:.2f}s (low confidence)")
-            return response
-        
+        if confidence_level == "low" and device_confidence < MEDIUM_CONFIDENCE_THRESHOLD:
+            # Override answer_type unless safety took priority
+            current_answer_type = query_info.get("answer_type", "")
+            if current_answer_type != "safety_warning_only":
+                logger.info("GATE 2: Low confidence, asking for better input")
+                response = build_low_confidence_response(device_info, query)
+                response["audio_instructions"] = generate_audio_script(response)
+                response = validate_response(response)
+                logger.info(f"Completed in {time.time() - start_time:.2f}s (low confidence)")
+                return response
+
+        # ===========================================
+        # DECISION GATE: Multiple Devices
+        # ===========================================
+        if validation_info.get("multiple_devices", False):
+            device_list = validation_info.get("device_list", [])
+            if len(device_list) > 1 and query_info.get("answer_type") not in ("safety_warning_only",):
+                logger.info(f"Multiple devices detected: {device_list}")
+                query_info["answer_type"] = "ask_clarifying_questions"
+                query_info["clarification_needed"] = True
+                query_info["clarifying_questions"] = [
+                    f"I see multiple devices: {', '.join(device_list)}. Which one do you need help with?"
+                ]
+
+        # ===========================================
+        # Determine final answer_type
+        # ===========================================
+        answer_type = query_info.get("answer_type", "troubleshoot_steps")
         query_type = query_info.get("query_type", "unclear")
         target_component = query_info.get("target_component")
+        target_components = query_info.get("target_components", [])
         needs_localization = query_info.get("needs_localization", False)
-        needs_steps = query_info.get("needs_steps", True)
-        
-        logger.info(f"Query type: {query_type}, Target: {target_component}, Localization: {needs_localization}")
-        
-        # Handle unclear queries
-        if query_type == "unclear" and query_info.get("clarification_needed"):
-            logger.info("GATE 3: Query unclear, generating clarification response")
-            clarification_response = query_parser.generate_clarifying_response(query_info, device_info)
-            # Continue with limited pipeline but add clarifying questions to response later
+
+        logger.info(f"Answer type: {answer_type}, Query type: {query_type}")
+        logger.info(f"Targets: {target_components or [target_component]}")
 
         # ===========================================
-        # Step 3.5: RAG Retrieval (if applicable)
+        # GATE 3.5: RAG Retrieval - REMOVED
+        # Now using Gemini native grounding with Google Search instead
         # ===========================================
-        logger.info("Step 3.5: Retrieving Manual Context...")
-        manual_context = []
-        if device_type and device_type not in ["Unknown", "not_a_device"]:
-            search_query = f"{device_type} {query}"
-            manual_context = rag_engine.retrieve(search_query, device_filter=device_type)
-            logger.info(f"Retrieved {len(manual_context)} manual chunks.")
+        manual_context = []  # Empty - relying on web grounding
 
+        # =============================================
+        # GATE 4: Component Localization (conditional)
         # ===========================================
-        # GATE 4: Spatial Localization (Conditional)
-        # ===========================================
-        spatial_info = {"component_visible": False, "spatial_description": "Not applicable"}
-        
-        # Determine if we should attempt localization
-        should_localize, reason = spatial_mapper.should_attempt_localization(device_info, query_info)
-        
-        if should_localize:
-            logger.info(f"GATE 4: Attempting Spatial Localization...")
-            
-            # Determine what to locate
-            target_for_spatial = target_component
-            if not target_for_spatial:
-                target_for_spatial = spatial_mapper.get_component_from_query(query, device_info.get("components", []))
-            if not target_for_spatial:
-                target_for_spatial = f"component relevant to: {query}"
-            
-            logger.info(f"Locating: '{target_for_spatial}'")
-            spatial_info = spatial_mapper.locate_component(
-                image, 
-                target_for_spatial, 
-                (image_width, image_height),
-                device_context=device_info
-            )
-            
-            # Check if component was found
-            if not spatial_info.get("component_visible", False):
-                logger.info(f"GATE 4: Component not visible - {spatial_info.get('visibility_reason', 'unknown')}")
-                
-                # For locate-type queries, return component not found response
-                if query_type == "locate":
-                    response = build_component_not_found_response(
-                        device_info, 
-                        spatial_info, 
-                        target_for_spatial
-                    )
-                    logger.info(f"Request completed in {time.time() - start_time:.2f}s (component not found)")
-                    return response
-            else:
-                logger.info(f"GATE 4 PASSED: Component located at {spatial_info.get('spatial_description', 'location found')}")
-        else:
-            logger.info(f"GATE 4 SKIPPED: {reason}")
+        localization_results = []
 
-        # ===========================================
-        # GATE 5: Step Generation (conditional)
-        # ===========================================
-        logger.info("GATE 5: Generating Response...")
-        
-        # Build spatial context
-        spatial_context = {
-            "component": spatial_info.get("component_name", target_component) if spatial_info else None,
-            "component_name": spatial_info.get("component_name", target_component) if spatial_info else None,
-            "spatial_description": spatial_info.get("spatial_description") if spatial_info else None,
-            "component_visible": spatial_info.get("component_visible", False) if spatial_info else False,
-            "visible_alternatives": spatial_info.get("visible_alternatives", []) if spatial_info else [],
-            "typical_location": spatial_info.get("typical_location", "") if spatial_info else ""
-        }
-        
-        # Copy pixel_coords if available
-        if spatial_info and spatial_info.get("pixel_coords"):
-            spatial_context["pixel_coords"] = spatial_info["pixel_coords"]
-        
-        # Determine if we should skip step generation
-        # Only skip when ALL conditions are met:
-        # 1. Query type is "locate" (just finding location)
-        # 2. AI determined steps are NOT needed (needs_steps=False)
-        # 3. Action is NOT an action verb (remove, replace, etc.)
-        should_skip_steps = (
-            query_type == "locate" and 
-            query_info.get("needs_steps", True) == False and
-            query_info.get("action_requested", "").lower() not in ["remove", "replace", "install", "repair", "fix"]
+        should_localize, localize_reason = spatial_mapper.should_attempt_localization(
+            device_info, query_info
         )
-        
-        if should_skip_steps:
-            logger.info("GATE 5 SKIPPED: Steps not required for simple locate query")
-            step_info = {
-                "issue_diagnosis": "Location identified.",
-                "troubleshooting_steps": [],
-                "audio_instructions": ""
-            }
+
+        if should_localize:
+            logger.info("GATE 4: Attempting localization...")
+
+            # Determine targets
+            targets = []
+            if target_components:
+                targets = target_components
+            elif target_component:
+                targets = [target_component]
+            else:
+                # Try extracting from query
+                extracted = spatial_mapper.get_multiple_components_from_query(
+                    query, device_info.get("components", [])
+                )
+                if extracted:
+                    targets = extracted
+                else:
+                    single = spatial_mapper.get_component_from_query(
+                        query, device_info.get("components", [])
+                    )
+                    if single:
+                        targets = [single]
+                    else:
+                        targets = [f"component relevant to: {query}"]
+
+            logger.info(f"Locating targets: {targets}")
+
+            try:
+                localization_results = spatial_mapper.locate_multiple_components(
+                    image,
+                    targets,
+                    (image_width, image_height),
+                    device_context=device_info,
+                )
+            except Exception as e:
+                logger.error(f"Localization failed: {e}")
+                localization_results = [
+                    {
+                        "target": t,
+                        "status": "not_visible",
+                        "reasoning": f"Localization error: {str(e)}",
+                        "suggested_action": "Please try again.",
+                        "confidence": 0.0,
+                        "bounding_box": None,
+                        "pixel_coords": None,
+                        "spatial_description": "",
+                        "landmark_description": "",
+                        "disambiguation_needed": False,
+                        "ambiguity_note": None,
+                        "component_visible": False,
+                    }
+                    for t in targets
+                ]
+
+            # Check results
+            found_count = sum(1 for r in localization_results if r.get("status") == "found")
+            total_count = len(localization_results)
+            logger.info(f"GATE 4: Found {found_count}/{total_count} targets")
+
+            # If locate-only and ALL targets not found
+            if answer_type == "locate_only" and found_count == 0 and total_count > 0:
+                logger.info("GATE 4: No targets found, but returning locate results with status")
+                # Don't early-return; let the response builder handle it with per-target status
         else:
-            logger.info("GATE 5: Generating troubleshooting steps...")
-            step_info = step_generator.generate_steps(
-                query=query,
-                device_info=device_info,
-                spatial_info=spatial_context,
-                manual_context=manual_context,
-                query_info=query_info
-            )
+            logger.info(f"GATE 4 SKIPPED: {localize_reason}")
 
         # ===========================================
-        # STEP 6: Response Building
+        # GATE 5: Web Grounding (BEFORE step generation)
+        # Grounded content enriches the step generator
         # ===========================================
-        logger.info("Step 6: Building Final Response...")
-        final_response = build_troubleshoot_response(
+        grounding_info = None
+        should_ground = _should_trigger_web_grounding(
+            answer_type, device_info, manual_context, query
+        )
+
+        if should_ground:
+            logger.info("GATE 5: Attempting native Google Search grounding...")
+            try:
+                context_str = "\n\n".join(manual_context) if manual_context else ""
+                grounding_info = gemini_client.generate_grounded_response(
+                    query=query,
+                    device_info=device_info,
+                    context=context_str,
+                )
+                if grounding_info and grounding_info.get("grounded"):
+                    logger.info(f"GATE 5: Web grounding successful - {len(grounding_info.get('sources', []))} sources")
+                    # Inject grounded guidance into manual_context so step generator uses it
+                    grounded_text = grounding_info.get("grounded_guidance", "")
+                    if grounded_text:
+                        manual_context.append(f"[Web Search Results]\n{grounded_text}")
+                else:
+                    logger.info("GATE 5: Web grounding returned no results")
+                    grounding_info = None
+            except Exception as e:
+                logger.warning(f"Web grounding failed (non-fatal): {e}")
+                grounding_info = None
+        else:
+            logger.info("GATE 5 SKIPPED: Web grounding not needed")
+
+        # ===========================================
+        # GATE 6: Response Generation (answer_type-aware)
+        # Now enriched with grounded web context if available
+        # ===========================================
+        step_info = None
+
+        # Only generate content for types that need it
+        if answer_type in ("troubleshoot_steps", "explain_only", "diagnose_only", "mixed"):
+            logger.info(f"GATE 6: Generating content for {answer_type}...")
+
+            # Build spatial context for step generator
+            spatial_context = {}
+            if localization_results:
+                found = [r for r in localization_results if r.get("status") == "found"]
+                if found:
+                    first = found[0]
+                    spatial_context = {
+                        "component": first.get("target"),
+                        "component_name": first.get("target"),
+                        "spatial_description": first.get("spatial_description"),
+                        "component_visible": True,
+                        "visible_alternatives": [],
+                        "typical_location": "",
+                    }
+                    if first.get("pixel_coords"):
+                        spatial_context["pixel_coords"] = first["pixel_coords"]
+
+            try:
+                step_info = step_generator.generate(
+                    query=query,
+                    device_info=device_info,
+                    spatial_info=spatial_context,
+                    manual_context=manual_context,
+                    query_info=query_info,
+                    answer_type=answer_type,
+                )
+            except Exception as e:
+                logger.error(f"Step generation failed: {e}")
+                step_info = {
+                    "issue_diagnosis": "An error occurred during analysis.",
+                    "troubleshooting_steps": [],
+                    "audio_instructions": "I encountered an error generating the response. Please try again.",
+                }
+
+            if step_info and step_info.get("skipped"):
+                step_info = None
+        else:
+            logger.info(f"GATE 6 SKIPPED: Not needed for {answer_type}")
+
+        # ===========================================
+        # GATE 7: Response Assembly
+        # ===========================================
+        logger.info("GATE 7: Building response...")
+
+        final_response = build_enhanced_response(
+            answer_type=answer_type,
             device_info=device_info,
-            spatial_info=spatial_context,
+            query_info=query_info,
+            validation_info=validation_info,
+            safety_info=safety_info if safety_detected else None,
+            localization_results=localization_results if localization_results else None,
             step_info=step_info,
             image_dims=(image_width, image_height),
-            validation_info=validation_info,
-            query_info=query_info
+            grounding_info=grounding_info,
         )
-        
-        logger.info(f"Request completed in {time.time() - start_time:.2f}s (success)")
+
+        # Generate audio script if not already present
+        if not final_response.get("audio_instructions"):
+            final_response["audio_instructions"] = generate_audio_script(final_response)
+        elif len(final_response["audio_instructions"]) < 10:
+            # Replace very short/empty audio
+            final_response["audio_instructions"] = generate_audio_script(final_response)
+
+        # Schema validation
+        final_response = validate_response(final_response)
+
+        logger.info(f"Completed in {time.time() - start_time:.2f}s ({answer_type})")
         return final_response
 
     except HTTPException as he:
         raise he
     except Exception as e:
         logger.error(f"Pipeline failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return a structured error instead of raising 500
+        error_response = {
+            "answer_type": "troubleshoot_steps",
+            "status": ResponseStatus.ERROR,
+            "needs_clarification": False,
+            "cannot_comply_reason": None,
+            "message": f"An error occurred: {str(e)}",
+            "device_info": {
+                "device_category": "unknown",
+                "device_type": "Unknown",
+                "brand": "unknown",
+                "model": "not visible",
+                "brand_model_guidance": None,
+                "confidence": 0.0,
+                "components": [],
+            },
+            "localization_results": None,
+            "explanation": None,
+            "diagnosis": None,
+            "troubleshooting_steps": None,
+            "clarifying_questions": None,
+            "visualizations": [],
+            "audio_instructions": "I encountered an error during analysis. Please try again.",
+            "web_grounding_used": False,
+            "grounding_sources": None,
+            "issue_diagnosis": f"Error: {str(e)}",
+            "device_identified": "Unknown",
+            "device_confidence": 0.0,
+            "confidence_level": "low",
+            "section_title": "Error",
+        }
+        return error_response
 
+
+def _should_trigger_web_grounding(
+    answer_type: str,
+    device_info: dict,
+    manual_context: list,
+    query: str,
+) -> bool:
+    """
+    Determine if Gemini's native Google Search grounding should be triggered.
+
+    This uses Gemini's built-in google_search tool which performs real web searches
+    and returns grounding_metadata with source URIs and cited text segments.
+
+    Trigger when:
+    1. Any troubleshoot/explain/diagnose query (primary knowledge source)
+    2. Brand/model is identified (model-specific guidance is most valuable)
+    3. User explicitly asks for official/latest/manufacturer info
+    4. Query mentions firmware, driver, update, specs, compatibility
+
+    Do NOT trigger when:
+    - answer_type is locate_only, identify_only, or non-content types
+    - Device is generic hobby board (Arduino, breadboard - community docs are better)
+    - Safety situation (use conservative general guidance, don't search)
+    
+    Note: manual_context is always empty now (RAG removed), relying fully on web grounding.
+    """
+    # Never ground for these types
+    if answer_type in (
+        "locate_only", "identify_only", "ask_clarifying_questions",
+        "reject_invalid_image", "ask_for_better_input", "safety_warning_only",
+    ):
+        return False
+
+    # Skip for generic hobby/dev boards
+    device_type = (device_info.get("device_type", "") or "").lower()
+    generic_devices = ["arduino", "breadboard", "generic", "usb cable", "prototype board"]
+    if any(g in device_type for g in generic_devices):
+        return False
+
+    query_lower = query.lower()
+
+    # Always ground for explicit web-info requests
+    explicit_triggers = [
+        "latest", "official", "manufacturer", "firmware", "driver",
+        "update", "specs", "specification", "compatibility", "recall",
+        "warranty", "manual", "documentation", "download", "support page",
+        "error code", "model number", "part number",
+    ]
+    if any(phrase in query_lower for phrase in explicit_triggers):
+        return True
+
+    # Ground when brand/model is known (model-specific results are high value)
+    brand = (device_info.get("brand", "") or "").lower()
+    model = (device_info.get("model", "") or "").lower()
+    has_brand = brand and brand not in ("unknown", "generic", "")
+    has_model = model and model not in ("not visible", "")
+
+    if has_brand and has_model:
+        # Known brand + model = always worth grounding for troubleshoot/explain
+        return True
+
+    if has_brand and answer_type in ("troubleshoot_steps", "diagnose_only"):
+        # Known brand + troubleshoot intent = ground for brand-specific guidance
+        return True
+
+    # For any content-generation mode without specific brand info, use grounding as primary knowledge source
+    if answer_type in ("troubleshoot_steps", "explain_only", "mixed", "diagnose_only"):
+        return True
+
+    return False
+
+
+def _build_error_response(combined_result: dict) -> dict:
+    """Build a structured error response."""
+    return {
+        "answer_type": "troubleshoot_steps",
+        "status": ResponseStatus.ERROR,
+        "needs_clarification": False,
+        "cannot_comply_reason": None,
+        "message": combined_result.get("error", "An error occurred"),
+        "retry_after": combined_result.get("retry_after", ""),
+        "device_info": {
+            "device_category": "unknown",
+            "device_type": "Unknown",
+            "brand": "unknown",
+            "model": "not visible",
+            "brand_model_guidance": None,
+            "confidence": 0.0,
+            "components": [],
+        },
+        "localization_results": None,
+        "explanation": None,
+        "diagnosis": None,
+        "troubleshooting_steps": None,
+        "clarifying_questions": None,
+        "visualizations": [],
+        "audio_instructions": "I'm temporarily unable to process your request. Please try again later.",
+        "web_grounding_used": False,
+        "grounding_sources": None,
+        "issue_diagnosis": combined_result.get("error", ""),
+        "device_identified": "Unknown",
+        "device_confidence": 0.0,
+        "confidence_level": "low",
+        "section_title": "Error",
+    }
+
+
+# --- Additional Endpoints ---
 
 @app.post("/api/validate-image")
 async def validate_image_endpoint(
     image_base64: str = Form(...),
 ):
-    """
-    Standalone endpoint to validate if an image is suitable for troubleshooting.
-    Useful for pre-validation before the full troubleshoot call.
-    """
+    """Standalone image validation endpoint."""
     try:
         image = process_image_for_gemini(image_base64)
         validation_info = image_validator.validate_image(image)
@@ -361,23 +609,16 @@ async def identify_device_endpoint(
     image_base64: str = Form(...),
     query: Optional[str] = Form(""),
 ):
-    """
-    Standalone endpoint for device identification.
-    Returns device info without full troubleshooting pipeline.
-    """
+    """Standalone device identification endpoint."""
     try:
         image = process_image_for_gemini(image_base64)
-        
-        # First validate
         validation_info = image_validator.validate_image(image, query)
         if not validation_info.get("is_valid", False):
             return {
                 "success": False,
                 "reason": validation_info.get("rejection_reason"),
-                "suggestion": validation_info.get("suggestion")
+                "suggestion": validation_info.get("suggestion"),
             }
-        
-        # Then detect
         device_info = device_detector.detect_device(image, query)
         device_info["success"] = True
         return device_info
@@ -387,23 +628,16 @@ async def identify_device_endpoint(
 
 @app.get("/api/quota-status")
 async def quota_status_endpoint():
-    """
-    Check current Gemini API quota status and circuit breaker state.
-    """
+    """Check Gemini API quota status."""
     return get_quota_status()
 
 
 @app.post("/api/reset-quota")
 async def reset_quota_endpoint(admin_key: str = Form(...)):
-    """
-    Reset the circuit breaker (emergency admin endpoint).
-    Requires admin key for safety.
-    """
-    # Simple admin key check (in production, use proper auth)
+    """Reset circuit breaker (admin only)."""
     expected_key = os.getenv("ADMIN_KEY", "fixit-admin-2026")
     if admin_key != expected_key:
         raise HTTPException(status_code=403, detail="Unauthorized")
-    
     reset_circuit_breaker()
     return {"message": "Circuit breaker reset", "status": get_quota_status()}
 

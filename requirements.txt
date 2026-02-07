@@ -5,7 +5,7 @@ google-genai
 python-dotenv
 pillow
 numpy
-sentence-transformers
+# sentence-transformers - REMOVED (was for RAG, now using Gemini native grounding)
 pypdf
 httpx
 streamlit

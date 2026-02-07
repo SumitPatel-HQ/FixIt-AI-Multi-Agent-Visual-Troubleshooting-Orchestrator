@@ -12,6 +12,24 @@ from backend.utils.gemini_client import gemini_client
 
 logger = logging.getLogger(__name__)
 
+# Response schema for structured output
+DEVICE_DETECTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "device_type": {"type": "string"},
+        "brand": {"type": ["string", "null"]},
+        "model": {"type": ["string", "null"]},
+        "components": {"type": "array", "items": {"type": "string"}},
+        "device_confidence": {"type": "number"},
+        "reasoning": {"type": "string"},
+        "is_identifiable": {"type": "boolean"},
+        "what_i_see": {"type": "string"},
+        "suggestions": {"type": "array", "items": {"type": "string"}},
+        "clarifying_questions": {"type": "array", "items": {"type": "string"}}
+    },
+    "required": ["device_type", "device_confidence", "reasoning", "is_identifiable", "what_i_see", "components"]
+}
+
 
 class DeviceDetector:
     """
@@ -120,6 +138,7 @@ Be honest! Low confidence is better than wrong identification.
         try:
             response = gemini_client.generate_response(
                 prompt=prompt,
+                response_schema=DEVICE_DETECTION_SCHEMA,
                 temperature=0.2
             )
             

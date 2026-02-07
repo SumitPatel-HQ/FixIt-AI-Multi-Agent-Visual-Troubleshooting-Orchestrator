@@ -1,7 +1,7 @@
 """
 Response Builder Utility
-Builds scenario-specific responses based on pipeline results.
-Handles different status types and confidence levels.
+Builds the enhanced response schema based on answer_type and pipeline results.
+Maps all agent outputs to the unified JSON structure.
 """
 
 from typing import Dict, Any, List, Optional
@@ -10,7 +10,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# Response status types
+# Answer type to UI title mapping
+ANSWER_TYPE_TITLES = {
+    "locate_only": "Component Location",
+    "identify_only": "Detected Components",
+    "explain_only": "How It Works",
+    "troubleshoot_steps": "Troubleshooting Steps",
+    "diagnose_only": "Diagnosis",
+    "mixed": "Analysis Results",
+    "ask_clarifying_questions": "I need more information",
+    "reject_invalid_image": "Image Not Suitable",
+    "ask_for_better_input": "Better Image Needed",
+    "safety_warning_only": "Safety Alert",
+}
+
+# Legacy status mapping for backwards compatibility
 class ResponseStatus:
     SUCCESS = "success"
     INVALID_IMAGE = "invalid_image"
@@ -20,335 +34,447 @@ class ResponseStatus:
     ERROR = "error"
 
 
+def build_enhanced_response(
+    answer_type: str,
+    device_info: Dict[str, Any],
+    query_info: Dict[str, Any],
+    validation_info: Dict[str, Any] = None,
+    safety_info: Dict[str, Any] = None,
+    localization_results: List[Dict[str, Any]] = None,
+    step_info: Dict[str, Any] = None,
+    image_dims: tuple = None,
+    grounding_info: Dict[str, Any] = None,
+) -> Dict[str, Any]:
+    """
+    Build the unified enhanced response conforming to the new schema.
+
+    Every response includes:
+    - answer_type, needs_clarification, cannot_comply_reason
+    - device_info (always)
+    - audio_instructions (always, generated later by audio_generator)
+    - Conditional sections based on answer_type
+    """
+    response = {
+        "answer_type": answer_type,
+        "needs_clarification": False,
+        "cannot_comply_reason": None,
+    }
+
+    # --- Device Info ---
+    response["device_info"] = _build_device_info(device_info)
+
+    # --- Set cannot_comply_reason based on context ---
+    if answer_type == "reject_invalid_image":
+        response["cannot_comply_reason"] = "invalid_image"
+    elif answer_type == "ask_for_better_input":
+        device_confidence = device_info.get("device_confidence", 0.0)
+        image_quality = (validation_info or {}).get("image_quality", "good")
+        if image_quality in ("blurry", "dark", "too_far"):
+            response["cannot_comply_reason"] = "low_confidence"
+        elif device_confidence < 0.3:
+            response["cannot_comply_reason"] = "low_confidence"
+    elif answer_type == "safety_warning_only":
+        response["cannot_comply_reason"] = "safety_risk"
+
+    # --- Needs Clarification ---
+    if answer_type == "ask_clarifying_questions":
+        response["needs_clarification"] = True
+    elif query_info.get("clarification_needed"):
+        response["needs_clarification"] = True
+
+    # --- Message (for UI display) ---
+    response["message"] = _get_message_for_type(
+        answer_type, device_info, validation_info, safety_info, query_info
+    )
+
+    # --- Section Title (for dynamic UI) ---
+    response["section_title"] = ANSWER_TYPE_TITLES.get(answer_type, "Analysis Results")
+
+    # --- Localization Results ---
+    if answer_type in ("locate_only", "troubleshoot_steps", "mixed"):
+        response["localization_results"] = localization_results or []
+    else:
+        response["localization_results"] = None
+
+    # --- Explanation ---
+    if answer_type in ("explain_only", "mixed"):
+        if step_info and isinstance(step_info, dict):
+            response["explanation"] = step_info.get("explanation")
+        else:
+            response["explanation"] = None
+    else:
+        response["explanation"] = None
+
+    # --- Diagnosis ---
+    if answer_type in ("troubleshoot_steps", "diagnose_only", "mixed", "safety_warning_only"):
+        response["diagnosis"] = _build_diagnosis(step_info, safety_info)
+    else:
+        response["diagnosis"] = None
+
+    # --- Troubleshooting Steps ---
+    if answer_type in ("troubleshoot_steps", "mixed"):
+        response["troubleshooting_steps"] = _build_steps(step_info)
+    else:
+        response["troubleshooting_steps"] = None
+
+    # --- Clarifying Questions ---
+    if response["needs_clarification"]:
+        questions = query_info.get("clarifying_questions", [])
+        if not questions and device_info.get("clarifying_questions"):
+            questions = device_info["clarifying_questions"]
+        if not questions:
+            questions = [
+                "What specific issue are you experiencing?",
+                "Which part of the device are you asking about?",
+            ]
+        response["clarifying_questions"] = questions
+    else:
+        response["clarifying_questions"] = None
+
+    # --- Visualizations ---
+    response["visualizations"] = _build_visualizations(
+        localization_results, image_dims
+    )
+
+    # --- Audio instructions placeholder (filled by audio_generator) ---
+    response["audio_instructions"] = ""
+    # Preserve any audio already generated by step_generator
+    if step_info and isinstance(step_info, dict):
+        audio = step_info.get("audio_instructions", "")
+        if audio:
+            response["audio_instructions"] = audio
+
+    # --- Web Grounding ---
+    response["web_grounding_used"] = bool(
+        grounding_info and grounding_info.get("grounded")
+    )
+    if response["web_grounding_used"]:
+        # Include actual source URIs from grounding metadata
+        sources = grounding_info.get("sources", [])
+        if sources and isinstance(sources, list):
+            response["grounding_sources"] = sources  # [{url, title}, ...]
+        else:
+            response["grounding_sources"] = [{"url": "", "title": grounding_info.get("sources_summary", "Google Search")}]
+        response["grounding_sources_summary"] = grounding_info.get("sources_summary", "Google Search")
+        response["grounding_disclaimer"] = grounding_info.get("disclaimer")
+        # Include search entry point HTML if available (for rich rendering)
+        if grounding_info.get("search_entry_point_html"):
+            response["search_entry_point_html"] = grounding_info["search_entry_point_html"]
+    else:
+        response["grounding_sources"] = None
+        response["grounding_sources_summary"] = None
+
+    # --- Legacy compatibility fields ---
+    response["status"] = _answer_type_to_status(answer_type)
+    response["device_identified"] = device_info.get("device_type", "Unknown")
+    response["device_confidence"] = device_info.get("device_confidence", 0.0)
+    response["confidence_level"] = device_info.get("confidence_level", "low")
+
+    # Legacy fields from step_info
+    if step_info and isinstance(step_info, dict):
+        response["issue_diagnosis"] = step_info.get("issue_diagnosis", "")
+        response["warnings"] = step_info.get("warnings")
+        response["when_to_seek_help"] = step_info.get("when_to_seek_help")
+    else:
+        response["issue_diagnosis"] = response.get("message", "")
+
+    # Detected components
+    if device_info.get("components"):
+        response["detected_components"] = device_info["components"]
+
+    # Safety info
+    if safety_info and safety_info.get("safety_detected"):
+        response["safety"] = safety_info
+
+    # Rejection-specific fields
+    if answer_type == "reject_invalid_image":
+        response["image_category"] = (validation_info or {}).get("image_category", "unknown")
+        response["what_was_detected"] = (validation_info or {}).get("what_i_see", "")
+        response["suggestion"] = (validation_info or {}).get("suggestion", "Please upload a photo of an electronic device.")
+        response["supported_devices"] = (validation_info or {}).get("supported_devices", [
+            "WiFi Routers & Modems", "Printers & Scanners",
+            "Laptops & Computers", "Smart Home Devices",
+            "Home Appliances", "Circuit Boards & Arduino",
+        ])
+
+    # Low confidence specific fields
+    if answer_type == "ask_for_better_input":
+        response["what_i_see"] = device_info.get("what_i_see", "")
+        response["reasoning"] = device_info.get("reasoning", "")
+        response["suggestions"] = device_info.get("suggestions", [
+            "Ensure the entire device is visible in the photo",
+            "Take the photo in good lighting",
+            "Include any visible brand names or model numbers",
+        ])
+
+    return response
+
+
+def _build_device_info(device_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the device_info section of the response."""
+    return {
+        "device_category": device_info.get("device_category", "unknown"),
+        "device_type": device_info.get("device_type", "Unknown"),
+        "brand": device_info.get("brand", "unknown"),
+        "model": device_info.get("model", "not visible"),
+        "brand_model_guidance": device_info.get("brand_model_guidance"),
+        "confidence": device_info.get("device_confidence", 0.0),
+        "components": device_info.get("components", []),
+    }
+
+
+def _build_diagnosis(
+    step_info: Dict[str, Any] = None,
+    safety_info: Dict[str, Any] = None,
+) -> Dict[str, Any]:
+    """Build the diagnosis section."""
+    diagnosis = {
+        "issue": "",
+        "severity": "medium",
+        "safety_warning": None,
+    }
+
+    if step_info and isinstance(step_info, dict):
+        # From step generator
+        diag = step_info.get("diagnosis")
+        if isinstance(diag, dict):
+            diagnosis["issue"] = diag.get("issue", "")
+            diagnosis["severity"] = diag.get("severity", "medium")
+            diagnosis["safety_warning"] = diag.get("safety_warning")
+            if diag.get("possible_causes"):
+                diagnosis["possible_causes"] = diag["possible_causes"]
+            if diag.get("indicators"):
+                diagnosis["indicators"] = diag["indicators"]
+            if diag.get("professional_needed"):
+                diagnosis["professional_needed"] = True
+        elif step_info.get("issue_diagnosis"):
+            diagnosis["issue"] = step_info["issue_diagnosis"]
+
+    if safety_info and safety_info.get("safety_detected"):
+        diagnosis["safety_warning"] = safety_info.get(
+            "safety_message", "This situation may require professional help."
+        )
+        diagnosis["severity"] = "critical"
+
+    return diagnosis
+
+
+def _build_steps(step_info: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    """Build the troubleshooting_steps section."""
+    if not step_info or not isinstance(step_info, dict):
+        return []
+
+    raw_steps = step_info.get("troubleshooting_steps", [])
+    if not isinstance(raw_steps, list):
+        return []
+
+    steps = []
+    for i, s in enumerate(raw_steps):
+        if not isinstance(s, dict):
+            continue
+        steps.append({
+            "step": s.get("step", s.get("step_number", i + 1)),
+            "instruction": s.get("instruction", ""),
+            "visual_cue": s.get("visual_cue", ""),
+            "estimated_time": s.get("estimated_time", ""),
+            "safety_note": s.get("safety_note"),
+            "overlay_reference": s.get("overlay_reference"),
+        })
+
+    return steps
+
+
+def _build_visualizations(
+    localization_results: List[Dict[str, Any]] = None,
+    image_dims: tuple = None,
+) -> List[Dict[str, Any]]:
+    """Build the visualizations section from localization results."""
+    if not localization_results:
+        return []
+
+    visualizations = []
+    for i, result in enumerate(localization_results):
+        if not isinstance(result, dict):
+            continue
+        if result.get("status") != "found":
+            continue
+
+        pixel_coords = result.get("pixel_coords")
+        bbox = None
+        if pixel_coords and isinstance(pixel_coords, dict):
+            bbox = {
+                "x_min": pixel_coords.get("x_min", 0),
+                "y_min": pixel_coords.get("y_min", 0),
+                "x_max": pixel_coords.get("x_max", 0),
+                "y_max": pixel_coords.get("y_max", 0),
+            }
+            # Clamp to image dimensions
+            if image_dims:
+                w, h = image_dims
+                bbox["x_min"] = max(0, min(bbox["x_min"], w))
+                bbox["y_min"] = max(0, min(bbox["y_min"], h))
+                bbox["x_max"] = max(0, min(bbox["x_max"], w))
+                bbox["y_max"] = max(0, min(bbox["y_max"], h))
+
+        target = result.get("target", "unknown")
+        visualizations.append({
+            "target": target,
+            "bounding_box": bbox,
+            "arrow_hint": None,
+            "label": target.title(),
+            "landmark_description": result.get("landmark_description", ""),
+            "confidence": result.get("confidence", 0.0),
+            "overlay_id": f"viz_{i + 1}",
+            "disambiguation_needed": result.get("disambiguation_needed", False),
+            "ambiguity_note": result.get("ambiguity_note"),
+        })
+
+    return visualizations
+
+
+def _get_message_for_type(
+    answer_type: str,
+    device_info: Dict[str, Any],
+    validation_info: Dict[str, Any] = None,
+    safety_info: Dict[str, Any] = None,
+    query_info: Dict[str, Any] = None,
+) -> str:
+    """Generate appropriate message based on answer_type."""
+    device_type = device_info.get("device_type", "device")
+
+    messages = {
+        "locate_only": f"Located components on your {device_type}.",
+        "identify_only": f"I identified this as a {device_type}.",
+        "explain_only": f"Here's how your {device_type} works.",
+        "troubleshoot_steps": f"Here's how to troubleshoot your {device_type}.",
+        "diagnose_only": f"Here's my diagnosis for your {device_type}.",
+        "mixed": f"Here's a comprehensive analysis of your {device_type}.",
+        "ask_clarifying_questions": "I need more information to help you effectively.",
+        "ask_for_better_input": "I'm having trouble analyzing the image clearly.",
+        "safety_warning_only": "This situation may require professional help. Please read the safety warning carefully.",
+    }
+
+    if answer_type == "reject_invalid_image":
+        return (validation_info or {}).get(
+            "rejection_reason",
+            "This image is not suitable for device troubleshooting.",
+        )
+
+    return messages.get(answer_type, "Analysis complete.")
+
+
+def _answer_type_to_status(answer_type: str) -> str:
+    """Map answer_type to legacy status for backwards compatibility."""
+    mapping = {
+        "locate_only": ResponseStatus.SUCCESS,
+        "identify_only": ResponseStatus.SUCCESS,
+        "explain_only": ResponseStatus.SUCCESS,
+        "troubleshoot_steps": ResponseStatus.SUCCESS,
+        "diagnose_only": ResponseStatus.SUCCESS,
+        "mixed": ResponseStatus.SUCCESS,
+        "ask_clarifying_questions": ResponseStatus.NEEDS_CLARIFICATION,
+        "reject_invalid_image": ResponseStatus.INVALID_IMAGE,
+        "ask_for_better_input": ResponseStatus.LOW_CONFIDENCE,
+        "safety_warning_only": ResponseStatus.SUCCESS,
+    }
+    return mapping.get(answer_type, ResponseStatus.SUCCESS)
+
+
+# --- Legacy builders kept for backwards compatibility ---
+
 def build_troubleshoot_response(
     device_info: Dict[str, Any],
     spatial_info: Dict[str, Any],
     step_info: Dict[str, Any],
     image_dims: tuple,
     validation_info: Dict[str, Any] = None,
-    query_info: Dict[str, Any] = None
+    query_info: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
-    """
-    Combines outputs from all agents into a structured response.
-    Creates scenario-specific responses based on confidence and results.
-    
-    Args:
-        device_info: Device detection results
-        spatial_info: Spatial mapping results
-        step_info: Step generation results
-        image_dims: (width, height) tuple
-        validation_info: Image validation results (optional)
-        query_info: Query parsing results (optional)
-        
-    Returns:
-        Structured response matching the API model
-    """
-    
-    # 1. Device Info
-    device_identified = device_info.get("device_type", "Unknown Device")
-    device_confidence = device_info.get("device_confidence", 0.0)
-    confidence_level = device_info.get("confidence_level", "low")
-    
-    # 2. Spatial Info
-    component = spatial_info.get("component_name")
-    if not component:
-        component = spatial_info.get("component")
-    
-    spatial_description = spatial_info.get("spatial_description", "Location not identified.")
-    component_visible = spatial_info.get("component_visible", False)
-    
-    # Handle Bounding Box
-    bbox = None
-    if component_visible and spatial_info.get("pixel_coords"):
-        bbox = spatial_info.get("pixel_coords")
-        if bbox:
-            width, height = image_dims
-            bbox["x_min"] = max(0, min(bbox.get("x_min", 0), width))
-            bbox["y_min"] = max(0, min(bbox.get("y_min", 0), height))
-            bbox["x_max"] = max(0, min(bbox.get("x_max", 0), width))
-            bbox["y_max"] = max(0, min(bbox.get("y_max", 0), height))
-    
-    # 3. Steps
-    steps = step_info.get("troubleshooting_steps", [])
-    issue_diagnosis = step_info.get("issue_diagnosis", "Diagnosis unavailable.")
-    audio = step_info.get("audio_instructions", "")
-    
-    # 4. Determine response status
-    status = _determine_status(device_info, spatial_info, step_info)
-    
-    # 5. Build base response
-    response = {
-        "status": status,
-        "device_identified": device_identified,
-        "device_confidence": device_confidence,
-        "confidence_level": confidence_level,
-        "component": component,
-        "spatial_description": spatial_description,
-        "bounding_box": bbox,
-        "issue_diagnosis": issue_diagnosis,
-        "troubleshooting_steps": steps,
-        "audio_instructions": audio
-    }
-    
-    # 6. Add scenario-specific fields
-    response = _add_scenario_fields(response, device_info, spatial_info, step_info, query_info)
-    
-    return response
+    """Legacy builder - delegates to build_enhanced_response."""
+    answer_type = (query_info or {}).get("answer_type", "troubleshoot_steps")
+
+    # Convert single spatial_info to localization_results format
+    localization_results = None
+    if spatial_info and spatial_info.get("component_name"):
+        component_visible = spatial_info.get("component_visible", False)
+        status = "found" if component_visible else "not_visible"
+        localization_results = [{
+            "target": spatial_info.get("component_name", "unknown"),
+            "status": status,
+            "bounding_box": spatial_info.get("bounding_box"),
+            "pixel_coords": spatial_info.get("pixel_coords"),
+            "spatial_description": spatial_info.get("spatial_description", ""),
+            "landmark_description": spatial_info.get("landmark_description", ""),
+            "reasoning": spatial_info.get("visibility_reason", ""),
+            "suggested_action": spatial_info.get("suggested_action", ""),
+            "confidence": spatial_info.get("confidence", 0.0),
+            "disambiguation_needed": spatial_info.get("disambiguation_needed", False),
+            "ambiguity_note": spatial_info.get("ambiguity_note"),
+        }]
+
+    return build_enhanced_response(
+        answer_type=answer_type,
+        device_info=device_info,
+        query_info=query_info or {},
+        validation_info=validation_info,
+        localization_results=localization_results,
+        step_info=step_info,
+        image_dims=image_dims,
+    )
 
 
 def build_rejection_response(
     validation_info: Dict[str, Any],
-    query: str
+    query: str,
 ) -> Dict[str, Any]:
-    """
-    Build a rejection response for invalid images.
-    
-    This is called when the image validation gate rejects the image.
-    """
-    
-    return {
-        "status": ResponseStatus.INVALID_IMAGE,
-        "device_identified": None,
-        "device_confidence": 0.0,
-        "message": validation_info.get("rejection_reason", "This image is not suitable for device troubleshooting."),
-        "image_category": validation_info.get("image_category", "unknown"),
-        "what_was_detected": validation_info.get("what_i_see", ""),
-        "suggestion": validation_info.get("suggestion", "Please upload a photo of an electronic device."),
-        "supported_devices": validation_info.get("supported_devices", [
-            "WiFi Routers & Modems",
-            "Printers & Scanners",
-            "Laptops & Computers",
-            "Smart Home Devices",
-            "Home Appliances",
-            "Circuit Boards & Arduino"
-        ]),
-        "troubleshooting_steps": [],
-        "audio_instructions": f"I'm sorry, but {validation_info.get('rejection_reason', 'this image does not appear to show an electronic device')}. FixIt AI helps troubleshoot electronic devices like routers, printers, and appliances. Please upload a photo of the actual device you need help with.",
-        "issue_diagnosis": "Image not suitable for device troubleshooting."
-    }
+    """Build rejection response using enhanced builder."""
+    return build_enhanced_response(
+        answer_type="reject_invalid_image",
+        device_info={"device_type": None, "device_confidence": 0.0},
+        query_info={"query_type": "unclear", "answer_type": "reject_invalid_image"},
+        validation_info=validation_info,
+    )
 
 
 def build_low_confidence_response(
     device_info: Dict[str, Any],
-    query: str
+    query: str,
 ) -> Dict[str, Any]:
-    """
-    Build a response when device confidence is too low to proceed.
-    """
-    
-    clarifying_questions = device_info.get("clarifying_questions", [
-        "What type of device is this? (router, printer, laptop, etc.)",
-        "Can you take a photo from a different angle?",
-        "Are there any visible brand names or labels?"
-    ])
-    
-    suggestions = device_info.get("suggestions", [
-        "Ensure the entire device is visible in the photo",
-        "Take the photo in good lighting",
-        "Include any visible brand names or model numbers"
-    ])
-    
-    return {
-        "status": ResponseStatus.LOW_CONFIDENCE,
-        "device_identified": device_info.get("device_type", "Unknown"),
-        "device_confidence": device_info.get("device_confidence", 0.0),
-        "message": "I'm having trouble identifying this device clearly.",
-        "what_i_see": device_info.get("what_i_see", ""),
-        "reasoning": device_info.get("reasoning", ""),
-        "clarifying_questions": clarifying_questions,
-        "suggestions": suggestions,
-        "troubleshooting_steps": [{
-            "step_number": 1,
-            "instruction": "Please answer the questions above or provide a clearer image",
-            "visual_cue": "Look for brand names, model numbers, or distinctive features",
-            "estimated_time": "1 minute"
-        }],
-        "audio_instructions": "I'm having trouble identifying this device. Could you tell me what type of device this is, or try taking a clearer photo? Look for any visible brand names or model numbers that might help.",
-        "issue_diagnosis": "Device identification uncertain - need more information.",
-        "general_safety_tip": "Before working on any electronic device, always disconnect power first."
-    }
+    """Build low confidence response using enhanced builder."""
+    return build_enhanced_response(
+        answer_type="ask_for_better_input",
+        device_info=device_info,
+        query_info={"query_type": "unclear", "answer_type": "ask_for_better_input",
+                     "clarification_needed": True,
+                     "clarifying_questions": device_info.get("clarifying_questions", [])},
+    )
 
 
 def build_component_not_found_response(
     device_info: Dict[str, Any],
     spatial_info: Dict[str, Any],
-    component_name: str
+    component_name: str,
 ) -> Dict[str, Any]:
-    """
-    Build a response when component localization fails but device is known.
-    """
-    
-    device_type = device_info.get("device_type", "device")
-    visible_alternatives = spatial_info.get("visible_alternatives", [])
-    typical_location = spatial_info.get("typical_location", "")
-    suggested_action = spatial_info.get("suggested_action", "")
-    
-    message = f"I can see this is a {device_type}, but I couldn't locate the {component_name}."
-    if spatial_info.get("visibility_reason"):
-        message += f" {spatial_info.get('visibility_reason')}"
-    
-    steps = []
-    
-    if typical_location:
-        steps.append({
-            "step_number": 1,
-            "instruction": f"The {component_name} is typically located {typical_location}",
-            "visual_cue": f"Look for the {component_name} in that area",
-            "estimated_time": "30 seconds"
-        })
-    
-    if suggested_action:
-        steps.append({
-            "step_number": len(steps) + 1,
-            "instruction": suggested_action,
-            "visual_cue": "This should reveal the component",
-            "estimated_time": "1 minute"
-        })
-    
-    if not steps:
-        steps.append({
-            "step_number": 1,
-            "instruction": f"Try taking a photo from a different angle to show the {component_name}",
-            "visual_cue": f"Make sure the area containing the {component_name} is visible",
-            "estimated_time": "30 seconds"
-        })
-    
-    return {
-        "status": ResponseStatus.COMPONENT_NOT_FOUND,
-        "device_identified": device_type,
-        "device_confidence": device_info.get("device_confidence", 0.0),
-        "component": component_name,
-        "component_searched": component_name,
-        "message": message,
+    """Build component not found response using enhanced builder."""
+    localization_results = [{
+        "target": component_name,
+        "status": "not_visible",
+        "bounding_box": None,
+        "pixel_coords": None,
         "spatial_description": spatial_info.get("spatial_description", ""),
-        "visible_components": visible_alternatives,
-        "typical_location": typical_location,
-        "suggestion": suggested_action,
-        "troubleshooting_steps": steps,
-        "audio_instructions": f"I can see your {device_type}, but the {component_name} isn't visible from this angle. {typical_location if typical_location else 'Try taking a photo from a different angle.'}"
-    }
+        "landmark_description": spatial_info.get("landmark_description", ""),
+        "reasoning": spatial_info.get("visibility_reason", ""),
+        "suggested_action": spatial_info.get("suggested_action", ""),
+        "confidence": 0.0,
+        "disambiguation_needed": False,
+        "ambiguity_note": None,
+        "visible_alternatives": spatial_info.get("visible_alternatives", []),
+        "typical_location": spatial_info.get("typical_location", ""),
+    }]
 
-
-def _determine_status(
-    device_info: Dict[str, Any],
-    spatial_info: Dict[str, Any],
-    step_info: Dict[str, Any]
-) -> str:
-    """Determine the response status based on results."""
-    
-    # Check for quota exhaustion (special case - not an error, just limited)
-    if step_info.get("quota_info"):
-        return ResponseStatus.SUCCESS  # Detection succeeded, just no detailed steps
-    
-    # Check for errors (but not quota exhaustion)
-    if device_info.get("error") or step_info.get("error"):
-        return ResponseStatus.ERROR
-    
-    # Check for low confidence
-    device_confidence = device_info.get("device_confidence", 0.0)
-    if device_confidence < 0.3 or device_info.get("needs_clarification"):
-        return ResponseStatus.LOW_CONFIDENCE
-    
-    # Check if device wasn't identified
-    device_type = device_info.get("device_type", "Unknown")
-    if device_type in ["Unknown", "not_a_device"]:
-        return ResponseStatus.INVALID_IMAGE
-    
-    # Check if clarification is needed
-    if step_info.get("needs_clarification"):
-        return ResponseStatus.NEEDS_CLARIFICATION
-    
-    # Check component visibility
-    if spatial_info.get("component_name") and not spatial_info.get("component_visible", True):
-        return ResponseStatus.COMPONENT_NOT_FOUND
-    
-    return ResponseStatus.SUCCESS
-
-
-def _add_scenario_fields(
-    response: Dict[str, Any],
-    device_info: Dict[str, Any],
-    spatial_info: Dict[str, Any],
-    step_info: Dict[str, Any],
-    query_info: Dict[str, Any] = None
-) -> Dict[str, Any]:
-    """Add scenario-specific fields to the response."""
-    
-    status = response.get("status", ResponseStatus.SUCCESS)
-    
-    # For low confidence, add clarifying questions
-    if status == ResponseStatus.LOW_CONFIDENCE:
-        response["clarifying_questions"] = device_info.get("clarifying_questions", [])
-        response["suggestions"] = device_info.get("suggestions", [])
-        response["general_safety_tip"] = "Before working on any electronic device, always disconnect power first."
-    
-    # For component not found, add alternatives
-    if status == ResponseStatus.COMPONENT_NOT_FOUND:
-        response["visible_alternatives"] = spatial_info.get("visible_alternatives", [])
-        response["typical_location"] = spatial_info.get("typical_location", "")
-    
-    # Add device components if available
-    if device_info.get("components"):
-        response["detected_components"] = device_info.get("components")
-    
-    # Add reasoning for transparency
-    if device_info.get("reasoning"):
-        response["reasoning"] = device_info.get("reasoning")
-    
-    # Add quota info if present
-    if step_info.get("quota_info"):
-        response["quota_info"] = step_info.get("quota_info")
-        response["message"] = "Device identified successfully. Detailed steps temporarily unavailable (AI quota reached)."
-    
-    # Add query understanding info if available
-    if query_info:
-        response["query_understood"] = {
-            "type": query_info.get("query_type"),
-            "target": query_info.get("target_component"),
-            "action": query_info.get("action_requested")
-        }
-    
-    # Add warnings from step generation
-    if step_info.get("warnings"):
-        response["warnings"] = step_info.get("warnings")
-    
-    # Add when to seek professional help
-    if step_info.get("when_to_seek_help"):
-        response["when_to_seek_help"] = step_info.get("when_to_seek_help")
-    
-    return response
-
-
-def format_response_for_display(response: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Format the response for frontend display.
-    Ensures consistent structure and user-friendly messages.
-    """
-    
-    formatted = response.copy()
-    
-    # Ensure status has a display message
-    status = formatted.get("status", ResponseStatus.SUCCESS)
-    status_messages = {
-        ResponseStatus.SUCCESS: "Analysis complete",
-        ResponseStatus.INVALID_IMAGE: "Invalid image for troubleshooting",
-        ResponseStatus.LOW_CONFIDENCE: "Need more information",
-        ResponseStatus.COMPONENT_NOT_FOUND: "Component not visible",
-        ResponseStatus.NEEDS_CLARIFICATION: "Clarification needed",
-        ResponseStatus.ERROR: "An error occurred"
-    }
-    formatted["status_message"] = status_messages.get(status, "Unknown status")
-    
-    # Format confidence as percentage
-    confidence = formatted.get("device_confidence", 0.0)
-    formatted["confidence_percent"] = f"{int(confidence * 100)}%"
-    
-    # Add confidence badge
-    if confidence >= 0.6:
-        formatted["confidence_badge"] = "high"
-    elif confidence >= 0.3:
-        formatted["confidence_badge"] = "medium"
-    else:
-        formatted["confidence_badge"] = "low"
-    
-    return formatted
+    return build_enhanced_response(
+        answer_type="locate_only",
+        device_info=device_info,
+        query_info={"query_type": "locate", "answer_type": "locate_only"},
+        localization_results=localization_results,
+    )

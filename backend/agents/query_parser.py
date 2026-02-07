@@ -10,6 +10,25 @@ from backend.utils.gemini_client import gemini_client
 
 logger = logging.getLogger(__name__)
 
+# Response schema for structured output
+QUERY_PARSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query_type": {
+            "type": "string",
+            "enum": ["identify", "locate", "troubleshoot", "procedure", "general_info", "unclear"]
+        },
+        "target_component": {"type": ["string", "null"]},
+        "action_requested": {"type": "string"},
+        "needs_localization": {"type": "boolean"},
+        "needs_steps": {"type": "boolean"},
+        "clarification_needed": {"type": "boolean"},
+        "clarifying_questions": {"type": "array", "items": {"type": "string"}},
+        "confidence": {"type": "number"}
+    },
+    "required": ["query_type", "action_requested", "needs_localization", "needs_steps", "clarification_needed", "clarifying_questions", "confidence"]
+}
+
 
 class QueryParser:
     """
@@ -120,6 +139,7 @@ Return a JSON object:
         try:
             response = gemini_client.generate_response(
                 prompt=prompt,
+                response_schema=QUERY_PARSE_SCHEMA,
                 temperature=0.2
             )
             

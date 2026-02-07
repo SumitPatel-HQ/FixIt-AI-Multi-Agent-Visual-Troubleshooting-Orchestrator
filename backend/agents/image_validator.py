@@ -11,6 +11,19 @@ from backend.utils.gemini_client import gemini_client
 
 logger = logging.getLogger(__name__)
 
+# Response schema for structured output
+IMAGE_VALIDATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "image_category": {"type": "string"},
+        "is_physical_device": {"type": "boolean"},
+        "confidence": {"type": "number"},
+        "what_i_see": {"type": "string"},
+        "rejection_reason": {"type": ["string", "null"]}
+    },
+    "required": ["image_category", "is_physical_device", "confidence", "what_i_see"]
+}
+
 
 class ImageValidator:
     """
@@ -117,6 +130,7 @@ Be HONEST about what you see. If it's clearly not a device, say so.
         try:
             response = gemini_client.generate_response(
                 prompt=prompt,
+                response_schema=IMAGE_VALIDATION_SCHEMA,
                 temperature=0.1  # Low temperature for more consistent classification
             )
             
