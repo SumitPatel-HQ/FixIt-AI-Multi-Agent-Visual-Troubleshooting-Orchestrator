@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-multipart
+google-genai
+python-dotenv
+pillow
+numpy
+sentence-transformers
+pypdf
+httpx
+streamlit
+requests
