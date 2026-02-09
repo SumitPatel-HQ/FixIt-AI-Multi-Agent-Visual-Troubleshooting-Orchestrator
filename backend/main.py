@@ -28,6 +28,7 @@ from backend.utils.response_builder import (
     build_rejection_response,
     build_low_confidence_response,
     build_component_not_found_response,
+    build_invalid_query_response,
     ResponseStatus,
 )
 from backend.utils.schema_validator import validate_response
@@ -74,6 +75,45 @@ CRITICAL_SAFETY_KEYWORDS = [
 WARNING_SAFETY_KEYWORDS = [
     "paper jam", "toner", "hot", "overheating", "moving parts",
 ]
+
+# Device-component compatibility mapping
+DEVICE_INCOMPATIBLE_COMPONENTS = {
+    "printer": ["ram", "cpu", "gpu", "graphics card", "motherboard", "ssd", "hard drive", "cooling fan"],
+    "laser printer": ["ram", "cpu", "gpu", "graphics card", "motherboard", "ssd", "hard drive", "cooling fan"],
+    "inkjet printer": ["ram", "cpu", "gpu", "graphics card", "motherboard", "ssd", "hard drive", "cooling fan"],
+    "scanner": ["ram", "cpu", "gpu", "graphics card", "motherboard", "ssd", "hard drive", "battery"],
+    "router": ["paper tray", "toner", "ink cartridge", "fuser", "drum", "print head"],
+    "modem": ["paper tray", "toner", "ink cartridge", "fuser", "drum", "print head"],
+    "microwave": ["router", "ethernet port", "wan port", "antenna", "ram", "cpu", "battery"],
+    "coffee maker": ["router", "ethernet port", "ram", "cpu", "motherboard", "gpu"],
+}
+
+def _check_device_query_mismatch(device_type: str, device_category: str, target_component: str, query: str) -> bool:
+    """
+    Check if the query asks about a component that's incompatible with the detected device.
+    Returns True if there's a clear mismatch (should show invalid query modal).
+    """
+    if not target_component and not device_type:
+        return False
+    
+    query_lower = query.lower()
+    device_lower = device_type.lower()
+    
+    # Check if device type has known incompatible components
+    for device_pattern, incompatible_list in DEVICE_INCOMPATIBLE_COMPONENTS.items():
+        if device_pattern in device_lower:
+            # Check if query mentions any incompatible component
+            if target_component and target_component.lower() in incompatible_list:
+                logger.info(f"Mismatch detected: {device_type} doesn't have '{target_component}'")
+                return True
+            
+            # Also check in raw query text for mentions
+            for incomp in incompatible_list:
+                if incomp in query_lower and len(incomp) > 3:  # Avoid false positives on short words
+                    logger.info(f"Mismatch detected: {device_type} doesn't have '{incomp}'")
+                    return True
+    
+    return False
 
 # --- Endpoints ---
 
@@ -143,6 +183,31 @@ async def troubleshoot(
         device_info = combined_result.get("device", {})
         query_info = combined_result.get("query", {})
         safety_info = combined_result.get("safety", {})
+
+        # ===========================================
+        # DECISION GATE: Invalid Query Check
+        # Check if query is garbage/nonsensical (e.g., "dddd") OR incompatible with device
+        # ===========================================
+        query_type = query_info.get("query_type", "unclear")
+        query_confidence = query_info.get("confidence", 0.0)
+        
+        # Check for gibberish patterns
+        query_stripped = query.strip().lower()
+        is_repeated_chars = len(set(query_stripped.replace(" ", ""))) <= 2 and len(query_stripped) > 2
+        is_unclear_low_confidence = query_type == "unclear" and query_confidence < 0.3
+        
+        # Check for device-query mismatch (incompatible component for this device type)
+        device_type = device_info.get("device_type", "Unknown").lower()
+        device_category = device_info.get("device_category", "").lower()
+        target_component = query_info.get("target_component", "")
+        is_device_query_mismatch = _check_device_query_mismatch(device_type, device_category, target_component, query)
+        
+        if is_repeated_chars or is_unclear_low_confidence or is_device_query_mismatch:
+            logger.info(f"INVALID QUERY DETECTED: '{query}' (type: {query_type}, confidence: {query_confidence}, mismatch: {is_device_query_mismatch})")
+            device_type_display = device_info.get("device_type", "device")
+            response = build_invalid_query_response(query, device_type_display, is_mismatch=is_device_query_mismatch)
+            logger.info(f"Completed in {time.time() - start_time:.2f}s (invalid query)")
+            return response
 
         # ===========================================
         # DECISION GATE: Image Validity
@@ -724,6 +789,20 @@ async def identify_device_endpoint(
 async def quota_status_endpoint():
     """Check Gemini API quota status."""
     return get_quota_status()
+
+
+@app.post("/api/trigger-quota-test")
+async def trigger_quota_test_endpoint():
+    """Test endpoint to simulate quota exhaustion (development only)."""
+    from backend.utils.gemini_client import gemini_client
+    # Set GEMINI_DISABLED to True to simulate quota exhaustion
+    import backend.utils.gemini_client as gc
+    gc.GEMINI_DISABLED = True
+    return {
+        "message": "Quota exhaustion simulated",
+        "status": get_quota_status(),
+        "note": "Next API call will return quota error. Use /api/reset-quota to restore."
+    }
 
 
 @app.post("/api/reset-quota")

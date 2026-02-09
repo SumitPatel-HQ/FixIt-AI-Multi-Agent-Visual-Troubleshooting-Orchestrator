@@ -135,6 +135,15 @@ export interface APIResponse {
 
    web_grounding_used?: boolean;
    grounding_sources?: GroundingSource[];
+
+   // Error fields for invalid query handling
+   status?: string;
+   error?: string;
+   query?: string;
+   device_type?: string;
+   is_mismatch?: boolean;
+   message?: string;
+   suggestions?: string[];
 }
 
 // Session data that includes the original image and query

@@ -7,6 +7,8 @@ import { cn } from '@/lib/utils';
 import { CameraCapture } from '@/components/input-hub/CameraCapture';
 import { FileUpload } from '@/components/input-hub/FileUpload';
 import { VoiceInput } from '@/components/input-hub/VoiceInput';
+import { InvalidQueryModal } from '@/components/ui/InvalidQueryModal';
+import { QuotaExhaustedModal } from '@/components/ui/QuotaExhaustedModal';
 import { useDashboard } from './dashboard-context';
 import { troubleshoot, storeSession, checkHealth, cleanupExpiredSessions } from '@/lib/api';
 
@@ -62,6 +64,19 @@ export default function InputHubPage() {
    const [errors, setErrors] = useState<{ image?: string; query?: string }>({});
    const [isSubmitting, setIsSubmitting] = useState(false);
    const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+   
+   // Invalid query modal state
+   const [showInvalidQueryModal, setShowInvalidQueryModal] = useState(false);
+   const [invalidQueryData, setInvalidQueryData] = useState<{
+      query: string;
+      deviceType: string;
+      isMismatch: boolean;
+      suggestions: string[];
+   } | null>(null);
+
+   // Quota exhausted modal state
+   const [showQuotaModal, setShowQuotaModal] = useState(false);
+   const [quotaRetryAfter, setQuotaRetryAfter] = useState<string>('tomorrow');
 
    // Check backend health on mount and cleanup expired sessions
    useEffect(() => {
@@ -149,8 +164,55 @@ export default function InputHubPage() {
                : undefined,
          });
 
+         console.log('[Dashboard] Troubleshoot result:', {
+            success: result.success,
+            hasResponse: !!result.response,
+            responseStatus: result.response?.status,
+            responseError: result.response?.error,
+            responseMessage: result.response?.message,
+            resultError: result.error,
+         });
+
          if (!result.success) {
+            // Check if it's a quota error
+            if (result.error?.includes('quota') || 
+                result.error?.includes('temporarily unavailable') ||
+                result.error?.includes('free tier')) {
+               console.log('[Dashboard] Quota error detected in result.error');
+               setQuotaRetryAfter(result.error.includes('tomorrow') ? 'tomorrow' : 'later');
+               setShowQuotaModal(true);
+               return;
+            }
             throw new Error(result.error || 'Failed to analyze device');
+         }
+
+         // Check if response indicates quota exhaustion (check status, message, and error fields)
+         const responseStatus = result.response?.status;
+         const errorMessage = result.response?.error || result.response?.message || '';
+         
+         console.log('[Dashboard] Checking quota in response:', { responseStatus, errorMessage });
+         
+         if ((responseStatus === 'error' && errorMessage.includes('quota')) ||
+             errorMessage.includes('temporarily unavailable') ||
+             errorMessage.includes('free tier')) {
+            console.log('[Dashboard] Quota error detected in response');
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const retryAfter = (result.response as any).retry_after as string | undefined;
+            setQuotaRetryAfter(retryAfter || 'tomorrow');
+            setShowQuotaModal(true);
+            return;
+         }
+
+         // Check if response indicates invalid query
+         if (result.response?.status === 'invalid_query' || result.response?.error === 'invalid_query') {
+            setInvalidQueryData({
+               query: result.response.query || queryText,
+               deviceType: result.response.device_type || 'device',
+               isMismatch: result.response.is_mismatch || false,
+               suggestions: result.response.suggestions || [],
+            });
+            setShowInvalidQueryModal(true);
+            return;
          }
 
          // Store session data for the results page
@@ -169,10 +231,39 @@ export default function InputHubPage() {
          const errorMessage = error instanceof Error
             ? error.message
             : 'Failed to submit request. Please try again.';
+         
+         // Check if error message indicates quota exhaustion
+         if (errorMessage.includes('quota') || 
+             errorMessage.includes('temporarily unavailable') ||
+             errorMessage.includes('free tier')) {
+            setQuotaRetryAfter('tomorrow');
+            setShowQuotaModal(true);
+            return;
+         }
+         
          setErrors({ ...errors, query: errorMessage });
       } finally {
          setIsSubmitting(false);
       }
+   };
+
+   const handleRetryQuery = () => {
+      setShowInvalidQueryModal(false);
+      setInvalidQueryData(null);
+      setQueryText('');
+      setErrors({});
+      // Focus on the query input
+      setTimeout(() => {
+         const textarea = document.querySelector('textarea');
+         if (textarea) {
+            textarea.focus();
+         }
+      }, 100);
+   };
+
+   const handleCloseQuotaModal = () => {
+      setShowQuotaModal(false);
+      setErrors({});
    };
 
    return (
@@ -266,7 +357,7 @@ export default function InputHubPage() {
             <div className="bg-secondary/20 backdrop-blur-sm border border-border/50 rounded-2xl p-6 flex flex-col">
                <div className="flex items-center justify-between mb-2">
                   <h2 className="text-xl font-display font-semibold text-foreground">
-                     What's the issue?
+                     What&apos;s the issue?
                   </h2>
                </div>
 
@@ -465,6 +556,25 @@ export default function InputHubPage() {
                )}
             </Button>
          </div>
+
+         {/* Invalid Query Modal */}
+         {showInvalidQueryModal && invalidQueryData && (
+            <InvalidQueryModal
+               query={invalidQueryData.query}
+               deviceType={invalidQueryData.deviceType}
+               isMismatch={invalidQueryData.isMismatch}
+               suggestions={invalidQueryData.suggestions}
+               onRetry={handleRetryQuery}
+            />
+         )}
+
+         {/* Quota Exhausted Modal */}
+         {showQuotaModal && (
+            <QuotaExhaustedModal
+               onClose={handleCloseQuotaModal}
+               retryAfter={quotaRetryAfter}
+            />
+         )}
 
       </div>
    );

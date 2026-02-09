@@ -34,6 +34,39 @@ class ResponseStatus:
     ERROR = "error"
 
 
+def build_invalid_query_response(query: str, device_type: str = "device", is_mismatch: bool = False) -> Dict[str, Any]:
+    """
+    Build a response for queries that don't contain recognizable keywords or are incompatible with device.
+    This is displayed on the input page, not redirected to results.
+    """
+    if is_mismatch:
+        message = f"The query '{query}' asks about a component or feature that doesn't apply to this {device_type}. Please ask about components relevant to this device type."
+        suggestions = [
+            f"This is a {device_type} - ask about its specific components",
+            "Example: 'How to fix paper jam?' (for printers)",
+            "Example: 'Where is the reset button?'",
+            "Example: 'What are the indicator lights?'",
+        ]
+    else:
+        message = f"The query '{query}' does not contain any recognizable keywords or instructions. Please specify what you would like to know about this {device_type}."
+        suggestions = [
+            "Try asking about specific components or issues",
+            "Example: 'Where is the reset button?'",
+            "Example: 'How to fix paper jam?'",
+            "Example: 'What are these LED lights?'",
+        ]
+    
+    return {
+        "status": "invalid_query",
+        "error": "invalid_query",
+        "query": query,
+        "device_type": device_type,
+        "is_mismatch": is_mismatch,
+        "message": message,
+        "suggestions": suggestions
+    }
+
+
 def build_enhanced_response(
     answer_type: str,
     device_info: Dict[str, Any],

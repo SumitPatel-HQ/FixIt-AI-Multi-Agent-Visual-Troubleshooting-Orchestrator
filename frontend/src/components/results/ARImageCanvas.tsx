@@ -129,7 +129,7 @@ export function ARImageCanvas({
       // CRITICAL FIX: Container has aspectRatio CSS matching the image,
       // so NO letterboxing occurs! Simply convert normalized coords to percentages.
       // The container and image are perfectly aligned, so 0-1 coords map directly to 0-100%.
-      
+
       return {
          left: `${x_min * 100}%`,
          top: `${y_min * 100}%`,
@@ -192,7 +192,7 @@ export function ARImageCanvas({
          height: img.naturalHeight,
       };
       setImageDimensions(dimensions);
-      
+
       console.log("🖼️ Image loaded:", dimensions);
       console.log("📦 Visualizations received:", safeVisualizations.length);
       safeVisualizations.forEach((viz, i) => {

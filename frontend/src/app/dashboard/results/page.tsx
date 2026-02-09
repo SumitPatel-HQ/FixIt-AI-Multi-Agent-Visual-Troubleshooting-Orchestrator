@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -16,7 +16,7 @@ import {
    DiagnosisPanel,
    RepairSteps,
    ComponentsDetected,
-   FollowUpInput,
+   // FollowUpInput,
    SuccessInfoPanel,
    LoadingProgress,
    LoadingSkeleton,
@@ -294,7 +294,7 @@ function EmptyState() {
    );
 }
 
-export default function ResultsPage() {
+function ResultsContent() {
    const router = useRouter();
    const searchParams = useSearchParams();
    const tabParam = searchParams.get("tab");
@@ -780,11 +780,32 @@ export default function ResultsPage() {
          </AnimatePresence>
 
          {/* Follow-up Input - Sticky Bottom */}
-         <FollowUpInput
+         {/* <FollowUpInput
             sessionId={sessionId || ""}
             isLoading={isSubmittingFollowUp}
             onSubmit={handleFollowUpSubmit}
-         />
+         /> */}
       </div>
+   );
+}
+
+export default function ResultsPage() {
+   return (
+      <Suspense fallback={
+         <div className="space-y-6">
+            <LoadingProgress stage="device_recognition" />
+            <div className="space-y-2">
+               <h1 className="text-4xl font-display font-bold text-foreground">
+                  Results
+               </h1>
+               <p className="text-muted-foreground text-lg">
+                  Loading results...
+               </p>
+            </div>
+            <LoadingSkeleton />
+         </div>
+      }>
+         <ResultsContent />
+      </Suspense>
    );
 }

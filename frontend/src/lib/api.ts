@@ -217,9 +217,16 @@ export async function troubleshoot(
          const errorData = await response.json().catch(() => ({}));
          console.error("[API] Error response:", response.status, errorData);
 
-         throw new Error(
-            errorData.detail || errorData.message || `Server error: ${response.status}`
-         );
+         // Check for quota-related errors
+         const errorMsg = errorData.detail || errorData.message || `Server error: ${response.status}`;
+         if (errorMsg.includes('quota') || 
+             errorMsg.includes('temporarily unavailable') ||
+             errorMsg.includes('free tier') ||
+             response.status === 429) {
+            throw new Error('AI service temporarily unavailable (free tier quota reached). Please try again tomorrow.');
+         }
+
+         throw new Error(errorMsg);
       }
 
       // Parse successful response
@@ -228,7 +235,36 @@ export async function troubleshoot(
          answerType: apiResponse.answer_type,
          deviceType: apiResponse.device_info?.device_type,
          hasSteps: !!apiResponse.troubleshooting_steps?.length,
+         status: apiResponse.status,
+         hasError: !!apiResponse.error,
+         hasMessage: !!apiResponse.message,
       });
+
+      // Check if response contains quota error (backend returns status="error" with message field)
+      if (apiResponse && typeof apiResponse === 'object') {
+         const errorMsg = apiResponse.error || apiResponse.message || '';
+         const responseStatus = apiResponse.status || '';
+         
+         console.log("[API] Checking for quota error:", { errorMsg, responseStatus });
+         
+         if ((responseStatus === 'error' || errorMsg) && 
+             typeof errorMsg === 'string' &&
+             (errorMsg.toLowerCase().includes('quota') || 
+              errorMsg.toLowerCase().includes('temporarily unavailable') ||
+              errorMsg.toLowerCase().includes('free tier'))) {
+            console.warn("[API] Quota exhausted detected:", errorMsg);
+            // Return as failed response so frontend can show quota modal
+            URL.revokeObjectURL(imageUrl);
+            return {
+               success: false,
+               sessionId,
+               response: apiResponse,
+               imageUrl: "",
+               originalQuery: request.query,
+               error: errorMsg,
+            };
+         }
+      }
 
       return {
          success: true,
