@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -8,6 +8,7 @@ import { CameraCapture } from '@/components/input-hub/CameraCapture';
 import { FileUpload } from '@/components/input-hub/FileUpload';
 import { VoiceInput } from '@/components/input-hub/VoiceInput';
 import { useDashboard } from './dashboard-context';
+import { troubleshoot, storeSession, checkHealth, cleanupExpiredSessions } from '@/lib/api';
 
 type InputMode = 'camera' | 'upload';
 type QueryMode = 'voice' | 'text';
@@ -60,6 +61,23 @@ export default function InputHubPage() {
    // Form state
    const [errors, setErrors] = useState<{ image?: string; query?: string }>({});
    const [isSubmitting, setIsSubmitting] = useState(false);
+   const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+
+   // Check backend health on mount and cleanup expired sessions
+   useEffect(() => {
+      const checkBackend = async () => {
+         const health = await checkHealth();
+         setBackendStatus(health ? 'online' : 'offline');
+         if (health) {
+            console.log('[FixIt] Backend connected:', health);
+         } else {
+            console.warn('[FixIt] Backend offline - will use fallback mode');
+         }
+      };
+
+      checkBackend();
+      cleanupExpiredSessions();
+   }, []);
 
    // Handlers
    const handleCameraCapture = (file: File) => {
@@ -109,36 +127,49 @@ export default function InputHubPage() {
          return;
       }
 
+      // Warn if backend is offline
+      if (backendStatus === 'offline') {
+         setErrors({
+            ...errors,
+            query: 'Backend server is offline. Please ensure the backend is running on port 8000.'
+         });
+         return;
+      }
+
       setIsSubmitting(true);
+      setErrors({});
 
       try {
-         // Prepare form data
-         const formData = new FormData();
-         formData.append('image', selectedFile!);
-         formData.append('query', queryText);
-
-         // Add device hint if provided
-         if (deviceHint.type || deviceHint.brand || deviceHint.model) {
-            formData.append('device_hint', JSON.stringify(deviceHint));
-         }
-
-         // Make API request
-         const response = await fetch('/api/troubleshoot', {
-            method: 'POST',
-            body: formData,
+         // Call the real backend API
+         const result = await troubleshoot({
+            image: selectedFile!,
+            query: queryText,
+            deviceHint: (deviceHint.type || deviceHint.brand || deviceHint.model)
+               ? deviceHint
+               : undefined,
          });
 
-         if (!response.ok) {
-            throw new Error('Failed to submit troubleshooting request');
+         if (!result.success) {
+            throw new Error(result.error || 'Failed to analyze device');
          }
 
-         const data = await response.json();
+         // Store session data for the results page
+         storeSession({
+            sessionId: result.sessionId,
+            imageUrl: result.imageUrl,
+            originalQuery: result.originalQuery,
+            timestamp: new Date().toISOString(),
+            response: result.response,
+         });
 
          // Navigate to results page
-         router.push(`/dashboard/results?session=${data.sessionId}`);
+         router.push(`/dashboard/results?session=${result.sessionId}`);
       } catch (error) {
          console.error('Submission error:', error);
-         setErrors({ ...errors, query: 'Failed to submit request. Please try again.' });
+         const errorMessage = error instanceof Error
+            ? error.message
+            : 'Failed to submit request. Please try again.';
+         setErrors({ ...errors, query: errorMessage });
       } finally {
          setIsSubmitting(false);
       }

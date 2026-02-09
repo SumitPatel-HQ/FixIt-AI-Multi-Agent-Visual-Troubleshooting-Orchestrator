@@ -23,6 +23,7 @@ interface ARImageCanvasProps {
    imageUrl: string;
    visualizations: Visualization[];
    localizationResults: LocalizationResult[];
+   highlightedId?: string | null;
    onComponentClick?: (component: Visualization | LocalizationResult) => void;
 }
 
@@ -53,6 +54,7 @@ export function ARImageCanvas({
    imageUrl,
    visualizations,
    localizationResults,
+   highlightedId,
    onComponentClick,
 }: ARImageCanvasProps) {
    const containerRef = useRef<HTMLDivElement>(null);
@@ -68,24 +70,75 @@ export function ARImageCanvas({
    >(null);
    const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
 
-   // Get consolidated components (visualizations + localization results)
-   const allComponents = [
-      ...visualizations.map((v) => ({
-         ...v,
-         status: "found" as ComponentStatus,
-         isVisualization: true,
-      })),
-   ];
+   // Safely get visualizations array (may be null from API)
+   const safeVisualizations = visualizations || [];
+   const safeLocalizationResults = localizationResults || [];
 
-   // Calculate component position in percentage
-   const getComponentStyle = (bbox: { x_min: number; y_min: number; x_max: number; y_max: number }) => {
-      if (!imageDimensions.width || !imageDimensions.height) return {};
+   // Calculate component position in percentage with safety checks
+   const getComponentStyle = (bbox: any, _isRetry = false) => {
+      if (!bbox || typeof bbox !== 'object') return null;
+
+      // Extract and validate numeric values immediately
+      const x_min = Number(bbox.x_min);
+      const y_min = Number(bbox.y_min);
+      const x_max = Number(bbox.x_max);
+      const y_max = Number(bbox.y_max);
+
+      // Robust validation: check for missing, non-numeric, or NaN values
+      if (
+         isNaN(x_min) || isNaN(y_min) || isNaN(x_max) || isNaN(y_max)
+      ) {
+         // Silently skip - this is usually just empty or partial data
+         return null;
+      }
+
+      // Check if coordinates are in expected 0-1 range
+      // We allow a tiny margin for rounding errors (-0.05 to 1.05)
+      const isNormalized =
+         x_min >= -0.05 && x_max <= 1.05 &&
+         y_min >= -0.05 && y_max <= 1.05;
+
+      if (!isNormalized) {
+         // If already retried, stop recursion to prevent infinite loops
+         if (_isRetry) return null;
+
+         // If not normalized, we MUST have image dimensions to convert pixels to %
+         if (!imageDimensions.width || !imageDimensions.height) {
+            console.debug("⏳ Waiting for image dimensions to compute pixel-based style for:", bbox);
+            return null;
+         }
+
+         // Convert pixels to normalized 0-1
+         const normBbox = {
+            x_min: x_min / imageDimensions.width,
+            y_min: y_min / imageDimensions.height,
+            x_max: x_max / imageDimensions.width,
+            y_max: y_max / imageDimensions.height,
+         };
+         return getComponentStyle(normBbox, true);
+      }
+
+      // At this point we have normalized coordinates
+
+      // Validate box has area (prevents division by zero or invisible boxes)
+      if (x_min >= x_max || y_min >= y_max) {
+         console.warn("⚠️ Skipping zero-area or inverted bbox:", bbox);
+         return null;
+      }
+
+      // Calculate dimensions in percentage
+      let styleWidth = (x_max - x_min) * 100;
+      let styleHeight = (y_max - y_min) * 100;
+
+      // Enforce minimum size for visibility (at least 2%)
+      if (styleWidth < 2) styleWidth = 2;
+      if (styleHeight < 2) styleHeight = 2;
 
       return {
-         left: `${bbox.x_min * 100}%`,
-         top: `${bbox.y_min * 100}%`,
-         width: `${(bbox.x_max - bbox.x_min) * 100}%`,
-         height: `${(bbox.y_max - bbox.y_min) * 100}%`,
+         left: `${Math.max(0, x_min * 100)}%`,
+         top: `${Math.max(0, y_min * 100)}%`,
+         width: `${styleWidth}%`,
+         height: `${styleHeight}%`,
       };
    };
 
@@ -138,9 +191,15 @@ export function ARImageCanvas({
 
    const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
       const img = e.currentTarget;
-      setImageDimensions({
+      const dimensions = {
          width: img.naturalWidth,
          height: img.naturalHeight,
+      };
+      setImageDimensions(dimensions);
+      console.log("🖼️ Image loaded:", dimensions);
+      console.log("📦 Visualizations received:", safeVisualizations.length);
+      safeVisualizations.forEach((viz, i) => {
+         console.log(`  [${i}] ${viz.label}:`, viz.bounding_box ? "✅ has bbox" : "❌ no bbox");
       });
    };
 
@@ -170,7 +229,7 @@ export function ARImageCanvas({
             <div className="flex items-center justify-between">
                <h3 className="text-lg font-semibold text-white/90">Visual Analysis</h3>
                <span className="text-xs text-white/50">
-                  {visualizations.length} component{visualizations.length !== 1 ? "s" : ""} detected
+                  {safeVisualizations.length} component{safeVisualizations.length !== 1 ? "s" : ""} detected
                </span>
             </div>
 
@@ -295,56 +354,100 @@ export function ARImageCanvas({
                   {/* AR Overlay Layer */}
                   {showBoxes && (
                      <div className="absolute inset-0">
-                        {visualizations.map((viz, index) => {
-                           const status = getStatusFromComponent(viz);
-                           const colors = STATUS_COLORS[status];
-                           const style = getComponentStyle(viz.bounding_box);
+                        {[
+                           ...safeVisualizations,
+                           ...safeLocalizationResults.map(lr => ({
+                              ...lr,
+                              label: lr.target,
+                              overlay_id: lr.target,
+                              landmark_description: lr.landmark_description || lr.spatial_description
+                           }))
+                        ]
+                           .filter((viz) => {
+                              // Ensure bounding_box exists and has valid numbers
+                              const bbox = viz.bounding_box;
+                              if (!bbox || typeof bbox !== 'object') return false;
 
-                           return (
-                              <motion.div
-                                 key={viz.overlay_id || index}
-                                 initial={{ opacity: 0, scale: 0.9 }}
-                                 animate={{ opacity: 1, scale: 1 }}
-                                 transition={{ delay: index * 0.1 }}
-                                 className={`
-                        absolute border-2 rounded-lg cursor-pointer
+                              const hasValues =
+                                 typeof bbox.x_min === 'number' &&
+                                 typeof bbox.x_max === 'number' &&
+                                 (bbox.x_max - bbox.x_min > 0);
+
+                              if (!hasValues) return false;
+                              return true;
+                           })
+                           .map((viz, index) => {
+                              const status = getStatusFromComponent(viz);
+                              const colors = STATUS_COLORS[status];
+                              const style = getComponentStyle(viz.bounding_box);
+
+                              // Skip if style couldn't be computed
+                              if (!style) return null;
+
+                              const id = viz.overlay_id || (viz as any).target || index;
+                              const isHighlighted = highlightedId === id;
+
+                              // Check if box is near the top edge to flip label position
+                              const isNearTop = (viz.bounding_box?.y_min || 0) < 0.1;
+
+                              return (
+                                 <motion.div
+                                    key={id}
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{
+                                       opacity: 1,
+                                       scale: isHighlighted ? 1.05 : 1,
+                                       zIndex: isHighlighted ? 30 : 10
+                                    }}
+                                    transition={{
+                                       delay: isHighlighted ? 0 : index * 0.05,
+                                       duration: 0.3
+                                    }}
+                                    className={`
+                        absolute border-2 md:border-4 rounded-lg cursor-pointer
                         transition-all duration-300
-                        hover:border-4 hover:border-white hover:shadow-[0_0_20px_rgba(255,255,255,0.5)] hover:z-10
+                        shadow-[0_0_15px_rgba(0,0,0,0.3)]
+                        ${isHighlighted
+                                          ? `shadow-[0_0_30px_rgba(255,255,255,0.8)] z-30 scale-105 border-white ring-4 ring-white/20`
+                                          : `hover:shadow-[0_0_25px_rgba(255,255,255,0.6)] hover:z-20 border-opacity-80`
+                                       }
                         ${colors.border.replace("stroke-", "border-")}
                         ${colors.bg}
                       `}
-                                 style={style}
-                                 onClick={() => handleComponentClick(viz)}
-                              >
-                                 {/* Label */}
-                                 {showLabels && (
+                                    style={style}
+                                    onClick={() => handleComponentClick(viz)}
+                                 >
+                                    {/* Label */}
+                                    {(showLabels || isHighlighted) && (
+                                       <div
+                                          className={`
+                             absolute left-0 px-3 py-1.5 rounded-full text-xs font-bold tracking-wide
+                             whitespace-nowrap backdrop-blur-md shadow-lg border border-white/20 z-10
+                             ${isNearTop ? "top-2" : "-top-10"}
+                             ${isHighlighted ? "bg-white text-black scale-110 shadow-white/20" : `${colors.bg} ${colors.text}`}
+                           `}
+                                       >
+                                          {viz.label}
+                                       </div>
+                                    )}
+
+                                    {/* Confidence indicator */}
                                     <div
                                        className={`
-                            absolute -top-8 left-0 px-3 py-1 rounded-full text-xs font-bold tracking-wide
-                            whitespace-nowrap backdrop-blur-md shadow-lg border border-white/20
-                            ${colors.bg} ${colors.text}
-                          `}
+                           absolute -bottom-6 left-0 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-sm
+                           border border-white/10
+                           ${isHighlighted ? "text-white" : colors.text}
+                         `}
                                     >
-                                       {viz.label}
+                                       {Math.round(viz.confidence * 100)}%
                                     </div>
-                                 )}
-
-                                 {/* Confidence indicator */}
-                                 <div
-                                    className={`
-                          absolute -bottom-6 left-0 text-[10px] font-mono font-bold px-1 py-0.5 rounded bg-black/50 backdrop-blur-sm
-                          ${colors.text}
-                        `}
-                                 >
-                                    {Math.round(viz.confidence * 100)}%
-                                 </div>
-                              </motion.div>
-                           );
-                        })}
+                                 </motion.div>
+                              );
+                           })}
 
                         {/* Arrow hints */}
                         <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                           {visualizations
+                           {safeVisualizations
                               .filter((v) => v.arrow_hint)
                               .map((viz, index) => (
                                  <motion.line

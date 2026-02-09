@@ -308,36 +308,81 @@ def _build_visualizations(
     localization_results: List[Dict[str, Any]] = None,
     image_dims: tuple = None,
 ) -> List[Dict[str, Any]]:
-    """Build the visualizations section from localization results."""
+    """Build the visualizations section from localization results.
+    
+    IMPORTANT: Returns normalized coordinates (0.0-1.0) for frontend rendering.
+    The frontend ARImageCanvas expects coordinates in 0-1 range and converts to percentages.
+    """
     if not localization_results:
         return []
 
+    # Get image dimensions for normalization
+    img_width = image_dims[0] if image_dims else 1
+    img_height = image_dims[1] if image_dims else 1
+
     visualizations = []
+    logger.info(f"📊 Building visualizations from {len(localization_results)} localization results (image: {img_width}x{img_height}px)")
+    
     for i, result in enumerate(localization_results):
         if not isinstance(result, dict):
+            logger.warning(f"⚠️ Skipping non-dict result at index {i}")
             continue
-        if result.get("status") != "found":
+        
+        target = result.get("target", "unknown")
+        status = result.get("status", "unknown")
+        
+        if status != "found":
+            logger.info(f"ℹ️ Skipping '{target}' with status '{status}' (not 'found')")
             continue
 
         pixel_coords = result.get("pixel_coords")
         bbox = None
-        if pixel_coords and isinstance(pixel_coords, dict):
-            bbox = {
-                "x_min": pixel_coords.get("x_min", 0),
-                "y_min": pixel_coords.get("y_min", 0),
-                "x_max": pixel_coords.get("x_max", 0),
-                "y_max": pixel_coords.get("y_max", 0),
-            }
-            # Clamp to image dimensions
-            if image_dims:
-                w, h = image_dims
-                bbox["x_min"] = max(0, min(bbox["x_min"], w))
-                bbox["y_min"] = max(0, min(bbox["y_min"], h))
-                bbox["x_max"] = max(0, min(bbox["x_max"], w))
-                bbox["y_max"] = max(0, min(bbox["y_max"], h))
+        
+        if not pixel_coords:
+            logger.error(f"❌ Component '{target}' marked as 'found' but has no pixel_coords!")
+            continue
+            
+        if not isinstance(pixel_coords, dict):
+            logger.error(f"❌ Component '{target}' has invalid pixel_coords type: {type(pixel_coords)}")
+            continue
+        
+        # Get pixel values
+        x_min_px = pixel_coords.get("x_min", 0)
+        y_min_px = pixel_coords.get("y_min", 0)
+        x_max_px = pixel_coords.get("x_max", 0)
+        y_max_px = pixel_coords.get("y_max", 0)
+        
+        logger.info(f"🎯 Processing '{target}': pixel_coords=({x_min_px},{y_min_px})-({x_max_px},{y_max_px})")
+        
+        # Clamp to image dimensions first
+        x_min_px = max(0, min(x_min_px, img_width))
+        y_min_px = max(0, min(y_min_px, img_height))
+        x_max_px = max(0, min(x_max_px, img_width))
+        y_max_px = max(0, min(y_max_px, img_height))
+        
+        # Validate box has area
+        if x_min_px >= x_max_px or y_min_px >= y_max_px:
+            logger.error(f"❌ Invalid box for '{target}' after clamping: ({x_min_px},{y_min_px})-({x_max_px},{y_max_px})")
+            continue
+        
+        # Normalize to 0-1 range for frontend rendering
+        bbox = {
+            "x_min": x_min_px / img_width if img_width > 0 else 0,
+            "y_min": y_min_px / img_height if img_height > 0 else 0,
+            "x_max": x_max_px / img_width if img_width > 0 else 0,
+            "y_max": y_max_px / img_height if img_height > 0 else 0,
+        }
+        
+        # Final validation
+        if bbox["x_min"] >= bbox["x_max"] or bbox["y_min"] >= bbox["y_max"]:
+            logger.error(f"❌ Normalized bbox invalid for '{target}': {bbox}")
+            continue
+        
+        # Log for debugging
+        logger.info(f"✅ '{target}': pixel=({x_min_px},{y_min_px})-({x_max_px},{y_max_px}) -> normalized=({bbox['x_min']:.3f},{bbox['y_min']:.3f})-({bbox['x_max']:.3f},{bbox['y_max']:.3f})")
 
         target = result.get("target", "unknown")
-        visualizations.append({
+        viz_entry = {
             "target": target,
             "bounding_box": bbox,
             "arrow_hint": None,
@@ -347,8 +392,15 @@ def _build_visualizations(
             "overlay_id": f"viz_{i + 1}",
             "disambiguation_needed": result.get("disambiguation_needed", False),
             "ambiguity_note": result.get("ambiguity_note"),
-        })
+            # Include spatial description for detail panel
+            "spatial_description": result.get("spatial_description", ""),
+            "reasoning": result.get("reasoning", ""),
+            "suggested_action": result.get("suggested_action", ""),
+        }
+        visualizations.append(viz_entry)
+        logger.info(f"✅ Added visualization for '{target}' to response")
 
+    logger.info(f"📊 Final visualization count: {len(visualizations)}")
     return visualizations
 
 

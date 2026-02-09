@@ -120,6 +120,81 @@ Return a JSON object with HONEST assessments:
     "suggestions": ["if identification failed, suggest what might help"] 
 }
 
+CRITICAL - Components Field (THIS IS MANDATORY):
+⚠️ YOU MUST LIST AT LEAST 5-10 VISIBLE COMPONENTS - DO NOT RETURN JUST 1-2!
+
+Instructions:
+- Scan the ENTIRE image systematically (top-left → top-right → bottom-left → bottom-right)
+- List EVERY distinct physical part you can see
+- Include both major components AND visible details
+- DO NOT be minimal - be exhaustive!
+
+For MOTHERBOARDS, list:
+✓ CPU socket (heat bracket visible)
+✓ RAM slots (DIMM slots for memory modules) 
+✓ PCIe slots (expansion card slots)
+✓ SATA ports (storage drive connectors)
+✓ Power connectors (24-pin ATX, 8-pin CPU power)
+✓ Chipset heatsink (metal heat spreader)
+✓ CMOS battery (coin cell battery)
+✓ Audio jacks (colored ports)
+✓ USB headers/ports
+✓ VRM heatsinks (near CPU socket)
+
+For LAPTOPS (internal view), list:
+✓ RAM modules (memory sticks in slots)
+✓ SSD or HDD (storage drive)
+✓ Cooling fan (with blades visible)
+✓ Battery (rectangular power pack)
+✓ Heat pipes (copper tubes)
+✓ WiFi card (small module with antennas)
+✓ Keyboard connector (flat ribbon cable)
+✓ Touchpad connector
+✓ Display cable/connector
+✓ Ports (USB, HDMI, charging port)
+
+For PRINTERS, list:
+✓ Paper tray (input tray)
+✓ Output tray
+✓ Paper jam access area
+✓ Ink cartridges or toner cartridges
+✓ Control panel (buttons/display)
+✓ Paper feed rollers
+✓ Paper guides (adjustable edges)
+✓ Power button
+✓ USB/Ethernet ports
+✓ Scanner bed (if multifunction)
+
+For ARDUINO/ROBOTICS, list:
+✓ Microcontroller board (Arduino/ESP32/etc)
+✓ GPIO pins (header pins)
+✓ Motor driver module
+✓ Motors (DC motors, servos)
+✓ Wheels (if robot)
+✓ Chassis (frame/body)
+✓ Battery pack or power supply
+✓ USB port (programming port)
+✓ Power jack
+✓ LEDs (indicator lights)
+✓ Buttons or switches
+✓ Sensors (ultrasonic, IR, etc)
+✓ Breadboard (if present)
+✓ Jumper wires
+
+For ROUTERS, list:
+✓ Ethernet ports (LAN ports)
+✓ WAN port (internet input port)
+✓ Power port
+✓ Antennas (external or internal)
+✓ LED indicators (power, internet, WiFi)
+✓ Reset button
+✓ WPS button
+✓ USB ports (if present)
+
+🎯 GOAL: Return 6-15 components per image minimum!
+❌ NEVER return just 1-2 components - that's lazy!
+✅ Be specific: "RAM module in slot 1", "cooling fan", "USB Type-C port"
+
 CONFIDENCE GUIDELINES:
 - 0.8-1.0: Clear view, recognizable brand/model, certain identification
 - 0.6-0.8: Good view, confident in device type but unsure of brand/model
@@ -163,6 +238,11 @@ Be honest! Low confidence is better than wrong identification.
         components = response.get("components", [])
         if not isinstance(components, list):
             components = []
+        
+        # Log component detection for debugging
+        logger.info(f"📦 Device Detector found {len(components)} components: {components[:10] if len(components) > 10 else components}")
+        if len(components) <= 2:
+            logger.warning(f"⚠️ INSUFFICIENT COMPONENTS! Device detector only found {len(components)} component(s). This will trigger fallback auto-detection.")
         
         # Build the result
         result = {

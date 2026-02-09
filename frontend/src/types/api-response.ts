@@ -96,6 +96,10 @@ export interface Visualization {
    overlay_id: string;
    disambiguation_needed: boolean;
    ambiguity_note: string | null;
+   // Additional fields for detail panel
+   spatial_description?: string;
+   reasoning?: string;
+   suggested_action?: string;
 }
 
 export interface GroundingSource {

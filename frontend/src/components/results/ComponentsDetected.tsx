@@ -54,6 +54,7 @@ export function ComponentsDetected({
    const [filter, setFilter] = useState<FilterType>("all");
 
    const filteredComponents = useMemo(() => {
+      if (!components) return [];
       switch (filter) {
          case "found":
             return components.filter((c) => c.status === "found");
@@ -65,9 +66,9 @@ export function ComponentsDetected({
    }, [components, filter]);
 
    const counts = useMemo(() => ({
-      all: components.length,
-      found: components.filter((c) => c.status === "found").length,
-      not_found: components.filter((c) => c.status !== "found").length,
+      all: components?.length ?? 0,
+      found: components?.filter((c) => c.status === "found").length ?? 0,
+      not_found: components?.filter((c) => c.status !== "found").length ?? 0,
    }), [components]);
 
    // Auto-expand on desktop
@@ -75,7 +76,7 @@ export function ComponentsDetected({
       setIsExpanded((prev) => !prev);
    };
 
-   if (components.length === 0) {
+   if (!components || components.length === 0) {
       return (
          <Card className="border-border/50 bg-secondary/30">
             <CardContent className="py-8 text-center">
@@ -229,10 +230,10 @@ export function ComponentsDetected({
                                              animate={{ width: `${component.confidence * 100}%` }}
                                              transition={{ delay: index * 0.05 + 0.2 }}
                                              className={`h-full rounded-full ${component.confidence >= 0.8
-                                                   ? "bg-emerald-500"
-                                                   : component.confidence >= 0.5
-                                                      ? "bg-amber-500"
-                                                      : "bg-red-500"
+                                                ? "bg-emerald-500"
+                                                : component.confidence >= 0.5
+                                                   ? "bg-amber-500"
+                                                   : "bg-red-500"
                                                 }`}
                                           />
                                        </div>

@@ -33,3 +33,9 @@ test_quota_protection.py
 FIXES_APPLIED.md
 test_quota_protection.py
 tmpclaude-*
+AR_boundary_cases.txt
+AR_BOUNDING_BOX_FIX.md
+INTEGRATION.md
+MULTI_COMPONENT_AR_FIX.md
+TESTING_GUIDE.md
+QUOTA_OPTIMIZATION_COMPLETE.md

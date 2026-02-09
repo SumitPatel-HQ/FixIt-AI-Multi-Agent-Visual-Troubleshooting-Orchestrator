@@ -41,10 +41,12 @@ CACHE_TTL_SECONDS = 300  # 5 minutes
 # API call tracking
 api_call_count = 0
 
-# RPD tracking (Gemini 2.5 Flash: 1 request per call, 1500 requests per day free tier)
+# RPD tracking (varies by model)
 RPD_PER_CALL = 1
 rpd_consumed_today = 0
-MAX_RPD_DAILY = 1500  # Free tier limit for Gemini Flash
+# DEFAULT: 1500 for most flash models (flash, 2.0-flash-exp, 3-flash-preview)
+# CHANGE TO 20 for gemini-2.5-flash-lite (or gemini-1.5-flash-8b)
+MAX_RPD_DAILY = 20  # gemini-2.5-flash-lite limit
 
 class GeminiClient:
     def __init__(self, model_name: str = DEFAULT_MODEL):
@@ -111,8 +113,11 @@ class GeminiClient:
         rpd_remaining = MAX_RPD_DAILY - rpd_consumed_today
         logger.info(f"📊 API Call #{api_call_count} | Rate: {len(rate_limit_calls)}/5 per min | RPD: {rpd_consumed_today}/{MAX_RPD_DAILY} ({rpd_remaining} remaining)")
         
+        # Warn earlier since we have only 20 calls total
+        if rpd_remaining <= 10:
+            logger.warning(f"⚠️ Low quota! Only {rpd_remaining}/{MAX_RPD_DAILY} requests remaining today")
         if rpd_remaining <= 5:
-            logger.warning(f"⚠️ Low RPD budget! Only {rpd_remaining} requests remaining today")
+            logger.critical(f"🚨 CRITICAL: Only {rpd_remaining} requests left! Consider switching to gemini-2.5-flash (1500/day limit)")
 
     def _is_quota_error(self, error: Exception) -> bool:
         """Check if error is a quota/auth error that should not be retried."""
@@ -693,7 +698,8 @@ Always mention when to seek professional help."""
         except json.JSONDecodeError:
             # More aggressive: try to find the last complete value and close from there
             # Walk back to find last valid closing brace/bracket/quote+comma
-            for trim_pos in range(len(text) - 1, max(0, len(text) - 500), -1):
+            # Increased range to preserve more content (was 500, then 2000, now 4000 for gemini-3-*)
+            for trim_pos in range(len(text) - 1, max(0, len(text) - 4000), -1):
                 candidate = text[:trim_pos].rstrip().rstrip(',')
                 # Recount open structures
                 ob, obk, ins, esc = 0, 0, False, False
@@ -723,6 +729,14 @@ Always mention when to seek professional help."""
                 closing = ']' * obk + '}' * ob
                 try:
                     result = json.loads(candidate + closing)
+                    
+                    # Check if we salvaged an empty results array
+                    if isinstance(result, dict) and 'results' in result:
+                        if isinstance(result['results'], list) and len(result['results']) == 0:
+                            # Try to preserve at least one result by going back further
+                            logger.warning(f"⚠️ Salvaged JSON has empty results array, trying to preserve content...")
+                            continue  # Keep looking for longer valid JSON
+                    
                     logger.info(f"Salvaged truncated JSON by trimming {len(text) - trim_pos} chars")
                     return result
                 except json.JSONDecodeError:

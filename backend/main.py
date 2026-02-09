@@ -319,29 +319,50 @@ async def troubleshoot(
         if should_localize:
             logger.info("GATE 4: Attempting localization...")
 
-            # Determine targets
+            # Determine targets - prioritize comprehensive detection
             targets = []
+            
+            # Priority 1: Use explicitly requested components from query parsing
             if target_components:
                 targets = target_components
+                logger.info(f"Using target_components from query: {targets}")
             elif target_component:
                 targets = [target_component]
+                logger.info(f"Using single target_component from query: {targets}")
             else:
-                # Try extracting from query
+                # Priority 2: Extract components mentioned in query
                 extracted = spatial_mapper.get_multiple_components_from_query(
                     query, device_info.get("components", [])
                 )
                 if extracted:
                     targets = extracted
+                    logger.info(f"Extracted components from query: {targets}")
                 else:
-                    single = spatial_mapper.get_component_from_query(
-                        query, device_info.get("components", [])
-                    )
-                    if single:
-                        targets = [single]
+                    # Priority 3: Use ALL components detected by device detector
+                    detected_components = device_info.get("components", [])
+                    if detected_components and len(detected_components) > 0:
+                        targets = detected_components[:10]  # Limit to top 10 to avoid quota issues
+                        logger.info(f"Using ALL detected components ({len(detected_components)} found): {targets}")
+                        
+                        # ⚠️ FALLBACK: If device detector only found 1-2 components, that's insufficient!
+                        # Trigger automatic component discovery to find MORE
+                        if len(detected_components) <= 2:
+                            logger.warning(f"⚠️ Device detector only found {len(detected_components)} component(s), triggering auto-discovery for comprehensive detection")
+                            targets = ["all major visible components"]  # Will trigger _detect_all_visible_components
                     else:
-                        targets = [f"component relevant to: {query}"]
+                        # Priority 4: Fallback to query-based generic target
+                        single = spatial_mapper.get_component_from_query(
+                            query, device_info.get("components", [])
+                        )
+                        if single:
+                            targets = [single]
+                            logger.info(f"Using single component from query keywords: {targets}")
+                        else:
+                            # Last resort: Ask for "all major components"
+                            targets = ["all major visible components"]
+                            logger.info(f"Fallback to generic detection: {targets}")
 
-            logger.info(f"Locating targets: {targets}")
+            logger.info(f"📍 Final localization targets: {targets}")
 
             try:
                 localization_results = spatial_mapper.locate_multiple_components(

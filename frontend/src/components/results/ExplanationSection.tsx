@@ -15,6 +15,8 @@ export function ExplanationSection({ explanation }: ExplanationSectionProps) {
       new Set(["overview"])
    );
 
+   if (!explanation) return null;
+
    const toggleSection = (section: string) => {
       setExpandedSections((prev) => {
          const newSet = new Set(prev);

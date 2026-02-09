@@ -26,6 +26,7 @@ import {
    InvalidImagePanel,
    SourcesList,
 } from "@/components/results";
+import { getSession, storeSession, troubleshoot } from "@/lib/api";
 
 // Mock session data for development - replace with actual API call
 const getMockSessionData = (sessionId: string): SessionData => ({
@@ -331,32 +332,47 @@ export default function ResultsPage() {
          setError(null);
 
          try {
-            // Stage 1: Device Recognition
-            setLoadingStage("device_recognition");
-            await new Promise((r) => setTimeout(r, 600));
+            // Try to load from session storage first (real API results)
+            const storedSession = getSession(sessionId);
 
-            // Stage 2: Visual Analysis
-            setLoadingStage("visual_analysis");
-            await new Promise((r) => setTimeout(r, 600));
+            if (storedSession) {
+               // Real data from backend
+               console.log("[Results] Loaded session from storage:", sessionId);
 
-            // Stage 3: Diagnosis
-            setLoadingStage("diagnosis");
-            await new Promise((r) => setTimeout(r, 500));
+               // Quick loading animation for better UX
+               setLoadingStage("device_recognition");
+               await new Promise((r) => setTimeout(r, 200));
+               setLoadingStage("visual_analysis");
+               await new Promise((r) => setTimeout(r, 200));
+               setLoadingStage("diagnosis");
+               await new Promise((r) => setTimeout(r, 150));
+               setLoadingStage("action_steps");
+               await new Promise((r) => setTimeout(r, 150));
 
-            // Stage 4: Action Steps
-            setLoadingStage("action_steps");
-            await new Promise((r) => setTimeout(r, 400));
+               setSessionData(storedSession);
+               setLoadingStage("complete");
+            } else {
+               // Fallback to mock data for development/testing
+               console.warn("[Results] Session not found, using mock data for:", sessionId);
 
-            // Load mock data (replace with actual API call)
-            // const response = await fetch(`/api/results/${sessionId}`);
-            // const data = await response.json();
-            const data = getMockSessionData(sessionId);
-            setSessionData(data);
+               // Full loading animation for mock data
+               setLoadingStage("device_recognition");
+               await new Promise((r) => setTimeout(r, 600));
+               setLoadingStage("visual_analysis");
+               await new Promise((r) => setTimeout(r, 600));
+               setLoadingStage("diagnosis");
+               await new Promise((r) => setTimeout(r, 500));
+               setLoadingStage("action_steps");
+               await new Promise((r) => setTimeout(r, 400));
 
-            // Complete
-            setLoadingStage("complete");
+               const data = getMockSessionData(sessionId);
+               setSessionData(data);
+               setLoadingStage("complete");
+            }
+
             setIsLoading(false);
          } catch (err) {
+            console.error("[Results] Error loading session:", err);
             setError("Failed to load results. Please try again.");
             setIsLoading(false);
          }
@@ -612,6 +628,7 @@ export default function ResultsPage() {
                         imageUrl={sessionData.imageUrl}
                         visualizations={response.visualizations}
                         localizationResults={response.localization_results}
+                        highlightedId={highlightedComponent}
                         onComponentClick={handleComponentClick}
                      />
                   </div>
@@ -648,8 +665,8 @@ export default function ResultsPage() {
                         <button
                            onClick={() => handleTabChange("steps")}
                            className={`pb-4 text-base font-medium transition-all relative ${activeTab === "steps"
-                                 ? "text-accent"
-                                 : "text-muted-foreground hover:text-foreground"
+                              ? "text-accent"
+                              : "text-muted-foreground hover:text-foreground"
                               }`}
                         >
                            Repair Steps
@@ -664,8 +681,8 @@ export default function ResultsPage() {
                         <button
                            onClick={() => handleTabChange("sources")}
                            className={`pb-4 text-base font-medium transition-all relative ${activeTab === "sources"
-                                 ? "text-accent"
-                                 : "text-muted-foreground hover:text-foreground"
+                              ? "text-accent"
+                              : "text-muted-foreground hover:text-foreground"
                               }`}
                         >
                            Sources

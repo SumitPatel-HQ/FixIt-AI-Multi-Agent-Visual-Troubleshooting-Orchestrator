@@ -11,7 +11,7 @@ interface SourcesListProps {
 export function SourcesList({ sources, onSourceClick, onReferenceClick }: SourcesListProps) {
    const [filter, setFilter] = useState<string>("all");
 
-   const filteredSources = sources.filter((source) => {
+   const filteredSources = (sources || []).filter((source) => {
       if (filter === "all") return true;
       return source.type === filter;
    });
@@ -43,7 +43,7 @@ export function SourcesList({ sources, onSourceClick, onReferenceClick }: Source
             <div className="flex items-center gap-2">
                <h2 className="text-xl font-semibold text-white">Reference Materials</h2>
                <span className="px-2 py-0.5 rounded-full bg-white/10 text-xs font-medium text-white/70">
-                  {sources.length} sources
+                  {sources?.length || 0} sources
                </span>
             </div>
 
@@ -54,8 +54,8 @@ export function SourcesList({ sources, onSourceClick, onReferenceClick }: Source
                      key={type}
                      onClick={() => setFilter(type)}
                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${filter === type
-                           ? "bg-accent text-white shadow-sm"
-                           : "text-muted-foreground hover:text-white hover:bg-white/5"
+                        ? "bg-accent text-white shadow-sm"
+                        : "text-muted-foreground hover:text-white hover:bg-white/5"
                         }`}
                   >
                      {type === "all" ? "All Sources" : type.charAt(0).toUpperCase() + type.slice(1)}
