@@ -51,10 +51,20 @@ app = FastAPI(
     version="0.3.0",
 )
 
-# CORS Middleware
+# CORS Middleware - Production Ready
+# Set FRONTEND_URL environment variable in production, defaults to wildcard for development
+ALLOWED_ORIGINS = os.getenv("FRONTEND_URL", "*")
+if ALLOWED_ORIGINS != "*":
+    # Parse comma-separated origins for multiple frontend URLs
+    allowed_origins_list = [origin.strip() for origin in ALLOWED_ORIGINS.split(",")]
+else:
+    allowed_origins_list = ["*"]
+
+logger.info(f"CORS configured with allowed origins: {allowed_origins_list}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
