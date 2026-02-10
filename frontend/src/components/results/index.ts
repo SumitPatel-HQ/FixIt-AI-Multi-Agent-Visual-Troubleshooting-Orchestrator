@@ -4,7 +4,7 @@ export { ARImageCanvas } from "./ARImageCanvas";
 export { DiagnosisPanel } from "./DiagnosisPanel";
 export { RepairSteps } from "./RepairSteps";
 export { ComponentsDetected } from "./ComponentsDetected";
-export { FollowUpInput } from "./FollowUpInput";
+// export { FollowUpInput } from "./FollowUpInput"; // Commented out - not currently in use
 export { SuccessInfoPanel } from "./SuccessInfoPanel";
 export { LoadingProgress, LoadingSkeleton, SkeletonCard, SkeletonImage } from "./LoadingProgress";
 export { ClarifyingQuestions } from "./ClarifyingQuestions";
