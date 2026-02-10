@@ -1,3 +1,4 @@
+
 # Python virtual environments
 .venv/
 
@@ -15,36 +16,11 @@ __pycache__/
 .idea/
 .vscode/
 
-# Database and data
-backend/data/chroma_db/
-backend/data/manuals/
 *.sqlite3
 
 
-test_*.py
-models_list.txt
+tests/
 models_full.txt
-FIXES_APPLIED.md
 list_models.py
-QUOTA_PROTECTION.md
-RPD_OPTIMIZATION.md
-test_new_sdk.py
-test_quota_protection.py
-FIXES_APPLIED.md
-test_quota_protection.py
-tmpclaude-*
-AR_boundary_cases.txt
-AR_BOUNDING_BOX_FIX.md
-INTEGRATION.md
-MULTI_COMPONENT_AR_FIX.md
-TESTING_GUIDE.md
-QUOTA_OPTIMIZATION_COMPLETE.md
-AR_PRECISION_FIX.md
-AR_FIX_COMPLETE.md
-AR_LETTERBOX_FIX.md
-AR_ACTUAL_FIX.md
-AR_EXPLAIN_ONLY_FIX.md
 clear_cache.js
-read.md
-QUOTA_MODAL_TESTING.md
-IMAGE_VALIDATION_FIX.md
+RUN.md
