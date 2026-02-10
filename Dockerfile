@@ -21,5 +21,5 @@ COPY . .
 # Expose port (Railway will override with $PORT)
 EXPOSE 8000
 
-# Run uvicorn on dynamic Railway port
-CMD uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Run uvicorn on dynamic Railway port (using shell form for PORT variable expansion)
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
