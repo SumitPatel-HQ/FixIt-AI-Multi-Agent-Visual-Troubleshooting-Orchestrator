@@ -379,9 +379,3 @@ FixIt includes built-in Gemini API quota management:
 ## 📄 License
 
 This project is for educational and personal use. See the repository for license details.
-
----
-
-<p align="center">
-  Built with ❤️ using <strong>Gemini AI</strong> and <strong>Next.js</strong>
-</p>
