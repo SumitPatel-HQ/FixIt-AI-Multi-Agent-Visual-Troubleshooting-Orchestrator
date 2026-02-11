@@ -378,4 +378,4 @@ FixIt includes built-in Gemini API quota management:
 
 ## 📄 License
 
-This project is for educational and personal use. See the repository for license details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
