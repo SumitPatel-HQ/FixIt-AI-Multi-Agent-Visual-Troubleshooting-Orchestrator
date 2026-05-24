@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
    SessionData,
-   APIResponse,
    LoadingStage,
    Visualization,
    LocalizationResult,
@@ -21,14 +20,12 @@ import {
    LoadingProgress,
    LoadingSkeleton,
    ClarifyingQuestions,
-   ExplanationSection,
    SafetyWarningOnly,
    InvalidImagePanel,
    SourcesList,
    SourcesEmptyState,
-   SourcesLoadingSkeleton,
 } from "@/components/results";
-import { getSession, storeSession, troubleshoot } from "@/lib/api";
+import { getSession, storeSession, followUpQuery } from "@/lib/api";
 
 // Mock session data for development - replace with actual API call
 const getMockSessionData = (sessionId: string): SessionData => ({
@@ -234,6 +231,7 @@ const getMockSessionData = (sessionId: string): SessionData => ({
             referenced_in_steps: [3, 4],
             published_date: "Aug 10, 2023",
          }
+         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ] as any[], // Use any[] temporarily if TS complains about GroundingSource structure mismatch if not fully propagated
    },
 });
@@ -324,8 +322,10 @@ function ResultsContent() {
    // Load session data when sessionId is present
    useEffect(() => {
       if (!sessionId) {
-         setSessionData(null);
-         setIsLoading(false);
+         setTimeout(() => {
+            setSessionData(null);
+            setIsLoading(false);
+         }, 0);
          return;
       }
 
@@ -383,36 +383,29 @@ function ResultsContent() {
       loadData();
    }, [sessionId]);
 
-   // Handle follow-up query submission
-   const handleFollowUpSubmit = async (query: string) => {
-      setIsSubmittingFollowUp(true);
-      try {
-         // TODO: Implement actual API call
-         // const response = await fetch('/api/troubleshoot', {
-         //   method: 'POST',
-         //   body: JSON.stringify({ query, sessionId, imageUrl: sessionData?.imageUrl })
-         // });
-
-         // Simulate API delay
-         await new Promise((r) => setTimeout(r, 2000));
-
-         console.log("Follow-up query:", query);
-         // Handle response and update session data
-      } catch (err) {
-         console.error("Follow-up submission failed:", err);
-      } finally {
-         setIsSubmittingFollowUp(false);
-      }
-   };
-
    // Handle clarifying question selection
-   const handleClarifyingSubmit = async (selectedOption: string) => {
+   const handleClarifyingSubmit = async (answer: string) => {
+      if (!sessionData || !sessionId) return;
       setIsSubmittingFollowUp(true);
       try {
-         console.log("Selected option:", selectedOption);
-         await new Promise((r) => setTimeout(r, 2000));
+         const newQuery = `${sessionData.originalQuery}\n\nClarification: ${answer}`;
+         const response = await followUpQuery(sessionData, newQuery);
+         if (response.success) {
+            const newSessionData = {
+               sessionId: sessionId,
+               imageUrl: sessionData.imageUrl,
+               originalQuery: newQuery,
+               timestamp: new Date().toISOString(),
+               response: response.response,
+            };
+            setSessionData(newSessionData);
+            storeSession(newSessionData);
+         } else {
+             setError(response.error || "Failed to process clarification.");
+         }
       } catch (err) {
          console.error("Clarifying submission failed:", err);
+         setError("An error occurred while submitting your answer.");
       } finally {
          setIsSubmittingFollowUp(false);
       }
@@ -579,11 +572,11 @@ function ResultsContent() {
             </h1>
             <div className="flex items-center gap-3">
                <p className="text-muted-foreground text-lg">
-                  {response.device_info.device_type}
-                  {response.device_info.brand && ` • ${response.device_info.brand}`}
-                  {response.device_info.model && ` ${response.device_info.model}`}
+                  {response.device_info?.device_type}
+                  {response.device_info?.brand && ` • ${response.device_info.brand}`}
+                  {response.device_info?.model && ` ${response.device_info.model}`}
                </p>
-               {response.device_info.confidence && (
+               {response.device_info?.confidence && (
                   <div className={`
                     flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-sm font-medium border
                     ${response.device_info.confidence > 0.8

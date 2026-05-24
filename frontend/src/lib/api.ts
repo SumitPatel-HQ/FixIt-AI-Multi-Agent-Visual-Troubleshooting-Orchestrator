@@ -316,18 +316,25 @@ export async function followUpQuery(
       });
    }
 
-   // Otherwise, we need to re-send with the original image context
-   // For now, we'll need to handle this differently since we don't store the original file
-   // This is a limitation that may need session storage on the backend
-   console.warn("[API] Follow-up without new image - feature requires backend session support");
+   // Try to retrieve the cached original image file
+   const cachedImage = getCachedSessionImage(sessionData.sessionId);
+   if (cachedImage) {
+      console.log("[API] Follow-up using cached image for session:", sessionData.sessionId);
+      return troubleshoot({
+         image: cachedImage,
+         query: newQuery,
+      });
+   }
 
+   // No cached image available
+   console.warn("[API] Follow-up without cached image - session image not found");
    return {
       success: false,
       sessionId: sessionData.sessionId,
-      response: createErrorResponse("Follow-up queries without a new image require the original image to be re-uploaded."),
+      response: createErrorResponse("The original image is no longer available. Please go back to the Input Hub and re-upload."),
       imageUrl: sessionData.imageUrl,
       originalQuery: newQuery,
-      error: "Please upload the image again for follow-up queries.",
+      error: "Original image not found. Please re-upload from the Input Hub.",
    };
 }
 
@@ -385,6 +392,23 @@ function createErrorResponse(message: string): APIResponse {
 
 const SESSION_STORAGE_KEY = "fixit_sessions";
 const SESSION_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
+
+// In-memory cache for original image files (File objects can't be serialized)
+const sessionImageCache = new Map<string, File>();
+
+/**
+ * Store an image file associated with a session (in-memory only)
+ */
+export function cacheSessionImage(sessionId: string, file: File): void {
+   sessionImageCache.set(sessionId, file);
+}
+
+/**
+ * Retrieve the cached image file for a session
+ */
+export function getCachedSessionImage(sessionId: string): File | undefined {
+   return sessionImageCache.get(sessionId);
+}
 
 /**
  * Store session data in localStorage

@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { HelpCircle, Send, ChevronRight } from "lucide-react";
+import { HelpCircle, Send } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 interface ClarifyingQuestionsProps {
    questions: string[];
    mainMessage?: string;
-   onSubmit: (selectedOption: string) => void;
+   onSubmit: (answer: string) => void;
    isLoading?: boolean;
 }
 
@@ -19,19 +19,13 @@ export function ClarifyingQuestions({
    onSubmit,
    isLoading,
 }: ClarifyingQuestionsProps) {
-   const [selectedOption, setSelectedOption] = useState<string | null>(null);
+   const [answer, setAnswer] = useState("");
 
    const handleSubmit = () => {
-      if (selectedOption) {
-         onSubmit(selectedOption);
+      if (answer.trim()) {
+         onSubmit(answer);
       }
    };
-
-   // Parse questions to get option labels (A, B, C...) if they follow a pattern
-   const options = questions.map((q, i) => ({
-      label: String.fromCharCode(65 + i), // A, B, C...
-      text: q,
-   }));
 
    return (
       <motion.div
@@ -54,43 +48,30 @@ export function ClarifyingQuestions({
                   <p className="text-center text-white/70">{mainMessage}</p>
                )}
 
-               {/* Options */}
+               {/* Questions */}
                <div className="space-y-3">
-                  {options.map((option) => (
-                     <motion.button
-                        key={option.label}
-                        whileHover={{ scale: 1.01 }}
-                        whileTap={{ scale: 0.99 }}
-                        onClick={() => setSelectedOption(option.text)}
-                        className={`
-                  w-full p-4 rounded-xl text-left transition-all duration-200
-                  flex items-start gap-3
-                  ${selectedOption === option.text
-                              ? "bg-accent/20 border-2 border-accent"
-                              : "bg-white/5 border-2 border-transparent hover:bg-white/10 hover:border-white/20"
-                           }
-                `}
-                     >
-                        <span
-                           className={`
-                    flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center
-                    text-sm font-bold
-                    ${selectedOption === option.text
-                                 ? "bg-accent text-white"
-                                 : "bg-white/10 text-white/70"
-                              }
-                  `}
-                        >
-                           {option.label}
-                        </span>
-                        <span className="text-white/90 leading-relaxed">
-                           {option.text}
-                        </span>
-                        {selectedOption === option.text && (
-                           <ChevronRight className="w-5 h-5 text-accent ml-auto flex-shrink-0" />
-                        )}
-                     </motion.button>
+                  {questions.map((q, i) => (
+                     <div key={i} className="bg-white/5 border border-white/10 p-4 rounded-xl text-white/90 leading-relaxed text-sm">
+                        {q}
+                     </div>
                   ))}
+               </div>
+
+               {/* Input field */}
+               <div className="space-y-2">
+                   <textarea
+                       className="w-full bg-black/50 border border-white/20 rounded-xl p-3 text-white placeholder:text-white/30 resize-none focus:outline-none focus:ring-2 focus:ring-accent"
+                       rows={3}
+                       placeholder="Type your answer here..."
+                       value={answer}
+                       onChange={(e) => setAnswer(e.target.value)}
+                       onKeyDown={(e) => {
+                           if (e.key === "Enter" && !e.shiftKey) {
+                               e.preventDefault();
+                               handleSubmit();
+                           }
+                       }}
+                   />
                </div>
 
                {/* Submit Button */}
@@ -99,7 +80,7 @@ export function ClarifyingQuestions({
                   size="lg"
                   className="w-full"
                   onClick={handleSubmit}
-                  disabled={!selectedOption || isLoading}
+                  disabled={!answer.trim() || isLoading}
                >
                   {isLoading ? (
                      <span className="flex items-center gap-2">
@@ -113,7 +94,7 @@ export function ClarifyingQuestions({
                   ) : (
                      <span className="flex items-center gap-2">
                         <Send className="w-4 h-4" />
-                        Submit Choice
+                        Submit Answer
                      </span>
                   )}
                </Button>

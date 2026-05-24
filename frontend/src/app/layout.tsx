@@ -13,7 +13,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
+    <ClerkProvider afterSignOutUrl="/">
       <html lang="en" data-scroll-behavior="smooth" className="dark scroll-smooth">
         <body className="antialiased">
           {children}

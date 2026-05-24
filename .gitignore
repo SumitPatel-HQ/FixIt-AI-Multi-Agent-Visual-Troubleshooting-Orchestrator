@@ -17,10 +17,4 @@ __pycache__/
 .vscode/
 
 *.sqlite3
-
-
-
-models_full.txt
-list_models.py
 clear_cache.js
-RUN.md

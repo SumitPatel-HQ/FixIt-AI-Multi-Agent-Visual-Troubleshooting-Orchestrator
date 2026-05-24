@@ -8,7 +8,7 @@ interface SourcesListProps {
    onReferenceClick?: (stepNumber: number) => void;
 }
 
-export function SourcesList({ sources, onSourceClick, onReferenceClick }: SourcesListProps) {
+export function SourcesList({ sources, onReferenceClick }: SourcesListProps) {
    const [filter, setFilter] = useState<string>("all");
 
    const filteredSources = (sources || []).filter((source) => {
@@ -146,6 +146,7 @@ function SourceCard({
                   </a>
 
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                     {/* eslint-disable-next-line @next/next/no-img-element */}
                      {source.favicon_url && <img src={source.favicon_url} alt="" className="w-3 h-3 rounded-sm" />}
                      <span className="font-medium text-white/60">{source.domain}</span>
                      {source.published_date && (
@@ -186,7 +187,7 @@ function SourceCard({
             {/* Excerpt */}
             <div className="bg-secondary/20 p-3 rounded-lg border border-white/5">
                <p className={`text-sm text-neutral-300 leading-relaxed ${!isExpanded && "line-clamp-2"}`}>
-                  "{source.excerpt}"
+                  &quot;{source.excerpt}&quot;
                </p>
                {source.excerpt.length > 150 && (
                   <button

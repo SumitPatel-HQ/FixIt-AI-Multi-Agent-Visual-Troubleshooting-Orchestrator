@@ -10,7 +10,7 @@ import { VoiceInput } from '@/components/input-hub/VoiceInput';
 import { InvalidQueryModal } from '@/components/ui/InvalidQueryModal';
 import { QuotaExhaustedModal } from '@/components/ui/QuotaExhaustedModal';
 import { useDashboard } from './dashboard-context';
-import { troubleshoot, storeSession, checkHealth, cleanupExpiredSessions, API_BASE_URL } from '@/lib/api';
+import { troubleshoot, storeSession, cacheSessionImage, checkHealth, cleanupExpiredSessions, API_BASE_URL } from '@/lib/api';
 
 type InputMode = 'camera' | 'upload';
 type QueryMode = 'voice' | 'text';
@@ -223,6 +223,9 @@ export default function InputHubPage() {
             timestamp: new Date().toISOString(),
             response: result.response,
          });
+
+         // Cache the original image file in memory so clarifying follow-ups can reuse it
+         cacheSessionImage(result.sessionId, selectedFile!);
 
          // Navigate to results page
          router.push(`/dashboard/results?session=${result.sessionId}`);

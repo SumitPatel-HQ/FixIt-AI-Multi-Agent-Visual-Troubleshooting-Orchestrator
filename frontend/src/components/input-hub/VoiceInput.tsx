@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
 
 interface VoiceInputProps {
    onTranscript: (text: string) => void;
@@ -14,6 +13,7 @@ export function VoiceInput({ onTranscript, currentText }: VoiceInputProps) {
    const [error, setError] = useState<string | null>(null);
    const [audioLevel, setAudioLevel] = useState(0);
 
+   // eslint-disable-next-line @typescript-eslint/no-explicit-any
    const recognitionRef = useRef<any>(null);
    const audioContextRef = useRef<AudioContext | null>(null);
    const analyserRef = useRef<AnalyserNode | null>(null);
@@ -30,6 +30,7 @@ export function VoiceInput({ onTranscript, currentText }: VoiceInputProps) {
    // Initialize Speech Recognition once
    useEffect(() => {
       if (typeof window !== 'undefined') {
+         // eslint-disable-next-line @typescript-eslint/no-explicit-any
          const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
          if (SpeechRecognition) {
@@ -38,6 +39,7 @@ export function VoiceInput({ onTranscript, currentText }: VoiceInputProps) {
             recognition.interimResults = true;
             recognition.lang = 'en-US';
 
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             recognition.onresult = (event: any) => {
                let finalTranscript = '';
                for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -51,6 +53,7 @@ export function VoiceInput({ onTranscript, currentText }: VoiceInputProps) {
                }
             };
 
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             recognition.onerror = (event: any) => {
                console.error('Speech recognition error:', event.error);
                setError('Speech recognition failed. Please try again.');
@@ -242,7 +245,7 @@ export function VoiceInput({ onTranscript, currentText }: VoiceInputProps) {
                         key={i}
                         className="w-1 bg-accent rounded-full transition-all duration-100"
                         style={{
-                           height: `${20 + Math.random() * audioLevel * 60}%`,
+                           height: `${20 + Math.abs(Math.sin(i * 10)) * audioLevel * 60}%`,
                            opacity: 0.5 + audioLevel * 0.7
                         }}
                      />

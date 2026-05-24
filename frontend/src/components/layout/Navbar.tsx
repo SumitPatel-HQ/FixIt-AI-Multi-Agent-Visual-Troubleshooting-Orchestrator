@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { SignInButton, SignUpButton, UserButton, Show, useUser } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 
-function NavbarActions({ setIsOpen }: { setIsOpen: (open: boolean) => void }) {
+function NavbarActions() {
    const { isSignedIn } = useUser()
    const router = useRouter()
 
@@ -23,7 +23,7 @@ function NavbarActions({ setIsOpen }: { setIsOpen: (open: boolean) => void }) {
                Dashboard
             </Button>
             <div className="hidden md:flex items-center pl-1">
-               <UserButton afterSignOutUrl="/" />
+               <UserButton />
             </div>
          </>
       )
@@ -82,7 +82,7 @@ function MobileSignIn() {
    if (isSignedIn) {
       return (
          <div className="flex justify-center py-2">
-            <UserButton afterSignOutUrl="/" />
+            <UserButton />
          </div>
       )
    }
@@ -139,7 +139,7 @@ export function Navbar() {
 
                {/* Right: Actions */}
                <div className="flex items-center justify-end gap-2">
-                  <NavbarActions setIsOpen={setIsOpen} />
+                  <NavbarActions />
                   <Button
                      variant="ghost"
                      size="icon"

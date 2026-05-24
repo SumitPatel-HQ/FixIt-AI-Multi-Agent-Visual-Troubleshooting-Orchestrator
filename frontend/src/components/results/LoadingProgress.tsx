@@ -10,14 +10,6 @@ interface LoadingProgressProps {
 
 export function LoadingProgress({ stage, isComplete }: LoadingProgressProps) {
    const config = LOADING_STAGE_CONFIG[stage];
-   const stages: LoadingStage[] = [
-      "device_recognition",
-      "visual_analysis",
-      "diagnosis",
-      "action_steps",
-      "complete",
-   ];
-   const currentIndex = stages.indexOf(stage);
 
    return (
       <div className="fixed top-0 left-0 right-0 z-60">

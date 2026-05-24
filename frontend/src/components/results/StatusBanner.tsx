@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, RefreshCw, Upload, CheckCircle2, XCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { X, RefreshCw, CheckCircle2, XCircle } from "lucide-react";
 import { AnswerType, DeviceInfo, CannotComplyReason } from "@/types/api-response";
 
 interface StatusBannerProps {

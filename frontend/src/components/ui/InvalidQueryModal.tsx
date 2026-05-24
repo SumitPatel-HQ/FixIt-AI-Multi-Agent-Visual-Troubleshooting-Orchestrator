@@ -14,7 +14,6 @@ export function InvalidQueryModal({
    query,
    deviceType,
    isMismatch = false,
-   suggestions = [],
    onRetry,
 }: InvalidQueryModalProps) {
    // Prevent body scroll when modal is open

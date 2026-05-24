@@ -75,6 +75,7 @@ export function ARImageCanvas({
    const safeLocalizationResults = localizationResults || [];
 
    // Calculate component position in percentage with safety checks
+   // eslint-disable-next-line @typescript-eslint/no-explicit-any
    const getComponentStyle = (bbox: any, _isRetry = false) => {
       if (!bbox || typeof bbox !== 'object') return null;
 
@@ -343,6 +344,7 @@ export function ARImageCanvas({
                      transform: `scale(${zoom}) translate(${position.x / zoom}px, ${position.y / zoom}px)`,
                   }}
                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                      src={imageUrl}
                      alt="Device under analysis"
@@ -384,6 +386,7 @@ export function ARImageCanvas({
                               // Skip if style couldn't be computed
                               if (!style) return null;
 
+                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
                               const id = viz.overlay_id || (viz as any).target || index;
                               const isHighlighted = highlightedId === id;
 

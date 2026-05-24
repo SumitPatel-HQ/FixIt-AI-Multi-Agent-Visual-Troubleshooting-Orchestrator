@@ -21,7 +21,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
    // Multi-call lock to prevent parallel initialization (fixes NotReadableError in Strict Mode)
    const startingRef = useRef(false);
 
-   const startCamera = useCallback(async (retryCount = 0) => {
+   const startCamera = useCallback(async function startCameraFn(retryCount = 0): Promise<void> {
       // Don't start if we're already trying or already streaming
       if (startingRef.current) return;
 
@@ -60,6 +60,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
             stream.getTracks().forEach(track => track.stop());
             startingRef.current = false;
          }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
          startingRef.current = false; // Release lock even on failure
          console.error('Camera access error:', err);
@@ -68,7 +69,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
          if ((err?.name === 'NotReadableError' || err?.message?.includes('Could not start video source')) && retryCount < 2) {
             console.log(`Resource busy, retrying in 1.5s... (Attempt ${retryCount + 1})`);
             await new Promise(resolve => setTimeout(resolve, 1500));
-            return startCamera(retryCount + 1);
+            return startCameraFn(retryCount + 1);
          }
 
          let message = 'Camera access denied. Please enable camera permissions.';
@@ -181,6 +182,7 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
          {/* Camera Preview / Captured Image */}
          <div className="relative bg-black rounded-xl overflow-hidden aspect-video">
             {capturedImage ? (
+               // eslint-disable-next-line @next/next/no-img-element
                <img src={capturedImage} alt="Captured" className="w-full h-full object-contain" />
             ) : (
                <video

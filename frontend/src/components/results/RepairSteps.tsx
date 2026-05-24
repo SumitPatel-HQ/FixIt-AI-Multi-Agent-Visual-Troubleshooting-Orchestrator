@@ -20,7 +20,7 @@ import {
    Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { TroubleshootingStep, AnswerType } from "@/types/api-response";
 
 interface RepairStepsProps {
@@ -56,7 +56,6 @@ export function RepairSteps({
    const [isPlaying, setIsPlaying] = useState(false);
    const [isMuted, setIsMuted] = useState(false);
    const [audioProgress, setAudioProgress] = useState(0);
-   const audioRef = useRef<HTMLAudioElement | null>(null);
    const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
 
    // Mobile swipe handling

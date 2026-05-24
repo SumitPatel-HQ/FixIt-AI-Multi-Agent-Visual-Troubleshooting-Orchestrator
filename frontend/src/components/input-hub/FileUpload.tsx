@@ -81,6 +81,7 @@ export function FileUpload({ onFileSelect, selectedFile, onRemove }: FileUploadP
             {/* File Preview */}
             <div className="relative bg-secondary/50 border border-border rounded-xl overflow-hidden">
                {isImage ? (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                      src={previewUrl}
                      alt="Preview"
