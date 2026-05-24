@@ -5,6 +5,105 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Menu, X } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
+import { SignInButton, SignUpButton, UserButton, Show, useUser } from "@clerk/nextjs"
+import { useRouter } from "next/navigation"
+
+function NavbarActions({ setIsOpen }: { setIsOpen: (open: boolean) => void }) {
+   const { isSignedIn } = useUser()
+   const router = useRouter()
+
+   if (isSignedIn) {
+      return (
+         <>
+            <Button
+               size="sm"
+               className="hidden xs:flex rounded-full px-5 h-9 text-xs font-bold tracking-wide shadow-lg shadow-white/5 active:scale-95 transition-transform"
+               onClick={() => router.push("/dashboard")}
+            >
+               Dashboard
+            </Button>
+            <div className="hidden md:flex items-center pl-1">
+               <UserButton afterSignOutUrl="/" />
+            </div>
+         </>
+      )
+   }
+
+   return (
+      <>
+         <Link href="/dashboard" className="hidden xs:block">
+            <Button size="sm" className="rounded-full px-5 h-9 text-xs font-bold tracking-wide shadow-lg shadow-white/5 active:scale-95 transition-transform">
+               Get Started
+            </Button>
+         </Link>
+         <Show when="signed-out">
+            <SignUpButton mode="modal" fallbackRedirectUrl="/">
+               <Button variant="ghost" size="sm" className="hidden md:inline-flex rounded-full text-md font-semibold hover:bg-white/5 cursor-pointer">
+                  Sign Up
+               </Button>
+            </SignUpButton>
+            <SignInButton mode="modal" fallbackRedirectUrl="/">
+               <Button variant="ghost" size="sm" className="hidden md:inline-flex rounded-full text-md font-semibold hover:bg-white/5 cursor-pointer">
+                  LogIn
+               </Button>
+            </SignInButton>
+         </Show>
+      </>
+   )
+}
+
+function MobileGetStarted({ setIsOpen }: { setIsOpen: (open: boolean) => void }) {
+   const { isSignedIn } = useUser()
+   const router = useRouter()
+
+   if (isSignedIn) {
+      return (
+         <Button
+            className="w-full rounded-xl py-6 text-base font-bold"
+            onClick={() => { router.push("/dashboard"); setIsOpen(false) }}
+         >
+            Dashboard
+         </Button>
+      )
+   }
+
+   return (
+      <Link href="/dashboard" onClick={() => setIsOpen(false)}>
+         <Button className="w-full rounded-xl py-6 text-base font-bold">
+            Get Started
+         </Button>
+      </Link>
+   )
+}
+
+function MobileSignIn() {
+   const { isSignedIn } = useUser()
+
+   if (isSignedIn) {
+      return (
+         <div className="flex justify-center py-2">
+            <UserButton afterSignOutUrl="/" />
+         </div>
+      )
+   }
+
+   return (
+      <Show when="signed-out">
+         <div className="flex flex-col gap-3">
+            <SignUpButton mode="modal" fallbackRedirectUrl="/">
+               <Button variant="secondary" className="w-full rounded-xl py-6 text-base font-bold">
+                  Sign Up
+               </Button>
+            </SignUpButton>
+            <SignInButton mode="modal" fallbackRedirectUrl="/">
+               <Button variant="ghost" className="w-full rounded-xl py-6 text-base font-bold border border-white/10">
+                  Sign In
+               </Button>
+            </SignInButton>
+         </div>
+      </Show>
+   )
+}
 
 export function Navbar() {
    const [isOpen, setIsOpen] = React.useState(false)
@@ -40,11 +139,7 @@ export function Navbar() {
 
                {/* Right: Actions */}
                <div className="flex items-center justify-end gap-2">
-                  <Link href="/dashboard" className="hidden xs:block">
-                     <Button size="sm" className="rounded-full px-5 h-9 text-xs font-bold tracking-wide shadow-lg shadow-white/5 active:scale-95 transition-transform">
-                        Get Started
-                     </Button>
-                  </Link>
+                  <NavbarActions setIsOpen={setIsOpen} />
                   <Button
                      variant="ghost"
                      size="icon"
@@ -52,9 +147,6 @@ export function Navbar() {
                      onClick={() => setIsOpen(!isOpen)}
                   >
                      {isOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-                  </Button>
-                  <Button variant="ghost" size="sm" className="hidden md:inline-flex rounded-full text-md font-semibold hover:bg-white/5 cursor-pointer">
-                     Sign In
                   </Button>
                </div>
             </div>
@@ -81,14 +173,8 @@ export function Navbar() {
                         </Link>
                      ))}
                      <div className="flex flex-col gap-3 pt-4">
-                        <Link href="/dashboard" onClick={() => setIsOpen(false)}>
-                           <Button className="w-full rounded-xl py-6 text-base font-bold">
-                              Get Started
-                           </Button>
-                        </Link>
-                        <Button variant="secondary" className="w-full rounded-xl py-6 text-base font-bold">
-                           Sign In
-                        </Button>
+                        <MobileGetStarted setIsOpen={setIsOpen} />
+                        <MobileSignIn />
                      </div>
                   </div>
                </motion.div>

@@ -1,9 +1,10 @@
 "use client"
 
 import { motion } from "framer-motion"
-import Link from "next/link"
 import { ArrowRight, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { SignInButton, useUser } from "@clerk/nextjs"
+import { useRouter } from "next/navigation"
 
 const container = {
    hidden: { opacity: 0 },
@@ -21,9 +22,39 @@ const item = {
    show: { opacity: 1, y: 0 }
 }
 
+function StartAnalysisButton() {
+   const { isSignedIn } = useUser()
+   const router = useRouter()
+
+   if (isSignedIn) {
+      return (
+         <Button
+            size="lg"
+            className="w-full sm:w-auto h-12 md:h-14 px-8 rounded-full gap-2 group shadow-2xl shadow-white/5 bg-white text-black hover:bg-white/90"
+            onClick={() => router.push("/dashboard")}
+         >
+            Start Free Analysis
+            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+         </Button>
+      )
+   }
+
+   return (
+      <SignInButton fallbackRedirectUrl="/dashboard" signUpFallbackRedirectUrl="/dashboard">
+         <Button
+            size="lg"
+            className="w-full sm:w-auto h-12 md:h-14 px-8 rounded-full gap-2 group shadow-2xl shadow-white/5 bg-white text-black hover:bg-white/90"
+         >
+            Start Free Analysis
+            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+         </Button>
+      </SignInButton>
+   )
+}
+
 export function Hero() {
    return (
-      <section className="relative pt-24 pb-12 md:pt-32 md:pb-20 px-4 md:px-6 overflow-hidden">
+      <section className="relative pt-24 pb-12 md:pt-48 md:pb-20 px-4 md:px-6 overflow-hidden">
          {/* Subtle gradient background */}
          <div className="absolute inset-x-0 top-0 h-[1500px] bg-gradient-to-b from-accent/10 via-transparent to-transparent pointer-events-none" />
 
@@ -34,22 +65,10 @@ export function Hero() {
             className="container mx-auto max-w-6xl relative"
          >
             <div className="text-center space-y-6 md:space-y-8 mb-12 md:mb-16">
-               <motion.div variants={item} className="inline-block">
-                  <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/50 backdrop-blur-sm border border-border text-[10px] md:text-xs font-medium text-white/80">
-                     <span className="flex items-center gap-2">
-                        <span>🔧</span>
-                        <span>Now in Beta</span>
-                     </span>
-                     <span className="w-px h-3 bg-border mx-1" />
-                     <span className="bg-gradient-to-r from-accent to-accent/60 bg-clip-text text-transparent">
-                        Powered by Gemini 3
-                     </span>
-                  </span>
-               </motion.div>
 
                <motion.h1
                   variants={item}
-                  className="text-4xl xs:text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight text-balance max-w-5xl mx-auto leading-[1.1]"
+                  className="text-4xl xs:text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight scale-y-125 text-balance max-w-5xl mx-auto leading-[1.1]"
                >
                   See the Problem.
                   <span className="block text-accent">Fix it Fast.</span>
@@ -64,12 +83,7 @@ export function Hero() {
                </motion.p>
 
                <motion.div variants={item} className="flex flex-col sm:flex-row items-center justify-center gap-3 md:gap-4 pt-4 px-8 sm:px-0">
-                  <Link href="/dashboard" className="w-full sm:w-auto">
-                     <Button size="lg" className="w-full sm:w-auto h-12 md:h-14 px-8 rounded-full gap-2 group shadow-2xl shadow-white/5 bg-white text-black hover:bg-white/90">
-                        Start Free Analysis
-                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                     </Button>
-                  </Link>
+                  <StartAnalysisButton />
                </motion.div>
 
                <motion.div variants={item} className="flex flex-col items-center justify-center gap-3 pt-8 text-[11px] md:text-sm text-white/40 font-medium sm:flex-row sm:gap-x-8">
