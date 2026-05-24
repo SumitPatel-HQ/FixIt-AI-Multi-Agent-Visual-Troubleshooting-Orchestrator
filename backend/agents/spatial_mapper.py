@@ -9,7 +9,10 @@ from typing import Dict, Any, List, Tuple, Optional
 from PIL import Image
 import json
 import logging
-from backend.utils.gemini_client import gemini_client
+try:
+    from backend.utils.gemini_client import gemini_client
+except ModuleNotFoundError:
+    from utils.gemini_client import gemini_client
 
 logger = logging.getLogger(__name__)
 

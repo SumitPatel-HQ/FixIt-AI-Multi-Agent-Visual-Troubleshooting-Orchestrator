@@ -21,25 +21,43 @@ import time
 import os
 
 # Utilities
-from backend.utils.image_processor import process_image_for_gemini
-from backend.utils.gemini_client import gemini_client, get_quota_status, reset_circuit_breaker
-from backend.utils.response_builder import (
-    build_enhanced_response,
-    build_rejection_response,
-    build_low_confidence_response,
-    build_component_not_found_response,
-    build_invalid_query_response,
-    ResponseStatus,
-)
-from backend.utils.schema_validator import validate_response
-from backend.utils.audio_generator import generate_audio_script
+try:
+    from backend.utils.image_processor import process_image_for_gemini
+    from backend.utils.gemini_client import gemini_client, get_quota_status, reset_circuit_breaker
+    from backend.utils.response_builder import (
+        build_enhanced_response,
+        build_rejection_response,
+        build_low_confidence_response,
+        build_component_not_found_response,
+        build_invalid_query_response,
+        ResponseStatus,
+    )
+    from backend.utils.schema_validator import validate_response
+    from backend.utils.audio_generator import generate_audio_script
 
-# Agents
-from backend.agents.image_validator import image_validator
-from backend.agents.device_detector import device_detector
-from backend.agents.spatial_mapper import spatial_mapper
-# RAG engine removed - using Gemini native grounding instead
-from backend.agents.step_generator import step_generator
+    # Agents
+    from backend.agents.image_validator import image_validator
+    from backend.agents.device_detector import device_detector
+    from backend.agents.spatial_mapper import spatial_mapper
+    # RAG engine removed - using Gemini native grounding instead
+    from backend.agents.step_generator import step_generator
+except ModuleNotFoundError:
+    from utils.image_processor import process_image_for_gemini
+    from utils.gemini_client import gemini_client, get_quota_status, reset_circuit_breaker
+    from utils.response_builder import (
+        build_enhanced_response,
+        build_rejection_response,
+        build_low_confidence_response,
+        build_component_not_found_response,
+        build_invalid_query_response,
+        ResponseStatus,
+    )
+    from utils.schema_validator import validate_response
+    from utils.audio_generator import generate_audio_script
+    from agents.image_validator import image_validator
+    from agents.device_detector import device_detector
+    from agents.spatial_mapper import spatial_mapper
+    from agents.step_generator import step_generator
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
@@ -822,9 +840,14 @@ async def quota_status_endpoint():
 @app.post("/api/trigger-quota-test")
 async def trigger_quota_test_endpoint():
     """Test endpoint to simulate quota exhaustion (development only)."""
-    from backend.utils.gemini_client import gemini_client
+    try:
+        from backend.utils.gemini_client import gemini_client
+        import backend.utils.gemini_client as gc
+    except ModuleNotFoundError:
+        from utils.gemini_client import gemini_client
+        import utils.gemini_client as gc
+
     # Set GEMINI_DISABLED to True to simulate quota exhaustion
-    import backend.utils.gemini_client as gc
     gc.GEMINI_DISABLED = True
     return {
         "message": "Quota exhaustion simulated",

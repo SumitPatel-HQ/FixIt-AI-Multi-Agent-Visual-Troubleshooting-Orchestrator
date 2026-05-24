@@ -7,7 +7,10 @@ Enhanced with answer_type-aware generation: explanation mode, diagnosis-only, an
 from typing import Dict, Any, List, Optional
 import json
 import logging
-from backend.utils.gemini_client import gemini_client
+try:
+    from backend.utils.gemini_client import gemini_client
+except ModuleNotFoundError:
+    from utils.gemini_client import gemini_client
 
 logger = logging.getLogger(__name__)
 

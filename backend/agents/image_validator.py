@@ -7,7 +7,10 @@ Acts as GATE 1 in the pipeline.
 from typing import Dict, Any
 from PIL import Image
 import logging
-from backend.utils.gemini_client import gemini_client
+try:
+    from backend.utils.gemini_client import gemini_client
+except ModuleNotFoundError:
+    from utils.gemini_client import gemini_client
 
 logger = logging.getLogger(__name__)
 
